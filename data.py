@@ -5,7 +5,7 @@ from platform import node
 import networkx as nx
 import pandas as pd
 from stellargraph import datasets, globalvar
-
+import numpy as np
 
 class Data:
     def __init__(self, d) -> None:
@@ -116,6 +116,8 @@ class Data:
                 header=None,
                 names=["target", "source"],
             )
+            edgelist.target.apply(str)
+            edgelist.source.apply(str)
             feature_names = ["w_{}".format(ii) for ii in range(3703)]
             column_names = feature_names + ["subject"]
             node_data = pd.read_csv(
@@ -124,7 +126,18 @@ class Data:
                 header=None,
                 names=column_names
             )
+            node_data.index = node_data.index.map(str)
             node_label = "subject"
+            all_sources = edgelist['source'].tolist()
+            all_targets = edgelist['target'].tolist()
+            edge_nodes = list(set(all_sources + all_targets))
+            feature_nodes = list(node_data.index)
+            
+            diff = list(np.setdiff1d(edge_nodes, feature_nodes)) 
+            edgelist_del = edgelist[(edgelist['target'].isin(
+                diff)) | (edgelist['source'].isin(diff))]
+            
+            edgelist = pd.concat([edgelist, edgelist_del]).drop_duplicates(keep=False)
         else:
             raise Exception('No such dataset')
 
@@ -147,6 +160,7 @@ class Data:
             header=None,
             names=feature_names,
         )
+
         classes = pd.read_csv(
             os.path.join("datasets/elliptic_bitcoin_dataset",
                          "elliptic_txs_classes.csv"),
@@ -160,6 +174,5 @@ class Data:
 if __name__ == "__main__":
     ds = Data('citeseer')
     node_data, node_label, edgelist, feature_names = ds.get_data()
-    print(node_data)
     print(edgelist)
 

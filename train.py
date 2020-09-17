@@ -31,17 +31,17 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "financial"
-EPOCHS = 175
-IN_RATIO = 0.01
-dropout = 0.5
-layer_sizes = [32]
-activations = ['tanh']
+DATASET_NAME = "citeseer" #"financial"
+EPOCHS = 50 #175
+IN_RATIO = 0.2 #0.01
+dropout = 0.1
+layer_sizes = [8, 8] #[32]
+activations = ['tanh', 'tanh']
 
 SHADOW_DATASET_NAME = "cora"
-SHADOW_EPOCHS = 50
+SHADOW_EPOCHS = 35
 dropout_shadow = 0.5
-layer_sizes_shadow = [32, ]
+layer_sizes_shadow = [16, ]
 activations_shadow = ['tanh']
 
 TRAIN = True
@@ -58,6 +58,7 @@ print('Dataset {} :: Nodes : {}, Edges : {}'.format(
 node_ids = list(node_data.index)  # List of all index of nodes
 num_nodes_in = int(IN_RATIO * num_nodes)
 node_ids_in = list(random.sample(node_ids, num_nodes_in))
+#node_ids_out = list(set(np.setdiff1d(node_ids, node_ids_in)) & set(node_data.index))
 node_ids_out = np.setdiff1d(node_ids, node_ids_in)
 print('IN nodes : {}, OUT nodes : {} (Total : {})'.format(
     len(node_ids_in), len(node_ids_out), num_nodes))
@@ -278,3 +279,7 @@ membership = np.array(membership)
 y_pred = clf.predict(entropies)
 print("SVM Accuracy (Attack) : %.2f%%" %
       (100.0 * accuracy_score(membership, y_pred > 0.5)))
+
+
+################# Attack 3
+

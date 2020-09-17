@@ -2,7 +2,7 @@ import os
 
 import stellargraph as sg
 from sklearn import feature_extraction, model_selection, preprocessing, svm
-from stellargraph.layer import GCN
+from stellargraph.layer import GCN, GAT
 from stellargraph.mapper import FullBatchNodeGenerator
 from tensorflow.keras import Model, layers, losses, optimizers, regularizers
 
@@ -27,8 +27,8 @@ class GCNModel:
 
         train_gen = generator.flow(node_ids, node_targets)
 
-        gcn = GCN(
-            dropout=self.dropout,
+        gcn = GAT(
+            # dropout=self.dropout,
             layer_sizes=self.layer_sizes, activations=self.activations, generator=generator
         )
 
