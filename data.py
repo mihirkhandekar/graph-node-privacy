@@ -1,5 +1,6 @@
 import itertools
 import os
+from platform import node
 
 import networkx as nx
 import pandas as pd
@@ -19,8 +20,10 @@ class Data:
         )
         edgelist.drop(columns=[0, 2], inplace=True)
         edgelist.columns = ["source", "target"]
-        edgelist["source"] = edgelist["source"].map(lambda x: x.lstrip("paper:"))
-        edgelist["target"] = edgelist["target"].map(lambda x: x.lstrip("paper:"))
+        edgelist["source"] = edgelist["source"].map(
+            lambda x: x.lstrip("paper:"))
+        edgelist["target"] = edgelist["target"].map(
+            lambda x: x.lstrip("paper:"))
         edgelist["label"] = "cites"  # set the edge type
 
         # Load the graph from the edgelist
@@ -30,7 +33,7 @@ class Data:
         nodes_as_dict = []
         with open(
             os.path.join(os.path.expanduser(data_dir),
-                        "Pubmed-Diabetes.NODE.paper.tab")
+                         "Pubmed-Diabetes.NODE.paper.tab")
         ) as fp:
             for line in itertools.islice(fp, 2, None):
                 line_res = line.split("\t")
@@ -39,7 +42,7 @@ class Data:
                     :-1
                 ]  # delete summary
                 feat_value = [l.split("=")[1]
-                            for l in line_res[1:]][:-1]  # delete summary
+                              for l in line_res[1:]][:-1]  # delete summary
                 feat_value = [pid] + [
                     float(x) for x in feat_value
                 ]  # change to numeric from str
@@ -65,7 +68,6 @@ class Data:
 
         return g_nx, node_data, feature_names, edgelist
 
-
     def get_data(self):
         '''
         # Data description
@@ -90,7 +92,7 @@ class Data:
                 os.path.join(dataset.data_directory, "cora.content"),
                 sep="\t",
                 header=None,
-                names=column_names,
+                names=column_names
             )
             node_label = "subject"
         elif self.d == 'pubmed':
@@ -100,13 +102,64 @@ class Data:
                 dataset.data_directory)
             edgelist = edgelist.drop(columns=['label'])
             node_label = "label"
-        elif self.d == 'blogcatalog3':
-            dataset = datasets.BlogCatalog3()
+        elif self.d == 'financial':
+            # Download to datasets/ folder using command `kaggle datasets download -d ellipticco/elliptic-data-set`
+            node_data, classes, edgelist, feature_names = self.get_financial_data()
+            node_data = node_data.join(classes)
+            node_label = 'class'
+        elif self.d == 'citeseer':
+            dataset = datasets.CiteSeer()
             dataset.download()
-            print(dataset.data_directory)
+            edgelist = pd.read_csv(
+                os.path.join(dataset.data_directory, "citeseer.cites"),
+                sep="\t",
+                header=None,
+                names=["target", "source"],
+            )
+            feature_names = ["w_{}".format(ii) for ii in range(3703)]
+            column_names = feature_names + ["subject"]
+            node_data = pd.read_csv(
+                os.path.join(dataset.data_directory, "citeseer.content"),
+                sep="\t",
+                header=None,
+                names=column_names
+            )
+            node_label = "subject"
+        else:
+            raise Exception('No such dataset')
 
         return node_data, node_label, edgelist, feature_names
 
+    def get_financial_data(self):
+        edgelist = pd.read_csv(
+            os.path.join("datasets/elliptic_bitcoin_dataset",
+                         "elliptic_txs_edgelist.csv"),
+            sep=",",
+            header=0,
+            names=["target", "source"],
+        )
+        feature_names = ["w_{}".format(ii) for ii in range(166)]
+        node_data = pd.read_csv(
+            os.path.join("datasets/elliptic_bitcoin_dataset",
+                         "elliptic_txs_features.csv"),
+            sep=",",
+            index_col=0,
+            header=None,
+            names=feature_names,
+        )
+        classes = pd.read_csv(
+            os.path.join("datasets/elliptic_bitcoin_dataset",
+                         "elliptic_txs_classes.csv"),
+            sep=",",
+            index_col=0,
+            header=0,
+        )
+        return node_data, classes, edgelist, feature_names
+
+
 if __name__ == "__main__":
-    ds = Data('blogcatalog3')
-    data = ds.get_data()
+    ds = Data('citeseer')
+    node_data, node_label, edgelist, feature_names = ds.get_data()
+    print(node_data)
+    print(edgelist)
+

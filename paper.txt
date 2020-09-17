@@ -1,0 +1,4 @@
+s. As observed by Zugner et al. ¨ (2018)
+and Wu et al. (2019a), nodes with more neighbors are harder
+to attack than those with fewer neighbors. The higher density of the graph requires a larger anchor set to achieve
+higher ASR. in https://arxiv.org/pdf/2002.04784.pdf
