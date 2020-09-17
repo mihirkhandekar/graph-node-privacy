@@ -27,8 +27,8 @@ class GCNModel:
 
         train_gen = generator.flow(node_ids, node_targets)
 
-        gcn = GAT(
-            # dropout=self.dropout,
+        gcn = GCN(              # GAT option
+            dropout=self.dropout,
             layer_sizes=self.layer_sizes, activations=self.activations, generator=generator
         )
 

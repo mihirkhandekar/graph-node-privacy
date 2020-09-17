@@ -31,17 +31,17 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "citeseer" #"financial"
-EPOCHS = 50 #175
+DATASET_NAME = "cora" #"financial"
+EPOCHS = 35 #175
 IN_RATIO = 0.2 #0.01
-dropout = 0.1
-layer_sizes = [8, 8] #[32]
-activations = ['tanh', 'tanh']
+dropout = 0.5
+layer_sizes = [16] #[32]
+activations = ['tanh']
 
-SHADOW_DATASET_NAME = "cora"
-SHADOW_EPOCHS = 35
-dropout_shadow = 0.5
-layer_sizes_shadow = [16, ]
+SHADOW_DATASET_NAME = "citeseer"
+SHADOW_EPOCHS = 75
+dropout_shadow = 0.0
+layer_sizes_shadow = [8, ]
 activations_shadow = ['tanh']
 
 TRAIN = True
@@ -146,7 +146,7 @@ cluster_centers = kmeans.cluster_centers_
 if cluster_centers[0][0] < cluster_centers[1][0]:
     y = -(y - 1)
 correct = (y == np.array(membership))
-print('Accuracy (Node features) {} '.format(np.sum(correct)/len(correct)))
+print('#### Attack 1a Accuracy : (Node features) {} '.format(np.sum(correct)/len(correct)))
 
 # Attack 1b
 # , np.array(entropies[0]).reshape(-1, 1)
@@ -158,7 +158,7 @@ if cluster_centers[0][0] < cluster_centers[1][0]:
     y = -(y - 1)
 assert len(y) == len(membership)
 correct = (y == np.array(membership))
-print('Accuracy (Node features + labels) {} '.format(np.sum(correct)/len(correct)))
+print('#### Attack 1b Accuracy : (Node features + labels) {} '.format(np.sum(correct)/len(correct)))
 
 # 1c
 edgelist_know = edgelist[edgelist['target'].isin(
@@ -183,7 +183,7 @@ cluster_centers = kmeans.cluster_centers_
 if cluster_centers[0][0] < cluster_centers[1][0]:
     y = -(y - 1)
 correct = (y == np.array(membership))
-print('Accuracy (Node features) {} '.format(np.sum(correct)/len(correct)))
+print('#### Attack 1c Accuracy : (Node features + edges) {} '.format(np.sum(correct)/len(correct)))
 
 
 # Attack 2 : Shadow graph
@@ -277,9 +277,70 @@ print("SVM Accuracy (Attack model) : %.2f%%" %
 entropies = np.array(entropies[0]).reshape(-1, 1)
 membership = np.array(membership)
 y_pred = clf.predict(entropies)
-print("SVM Accuracy (Attack) : %.2f%%" %
+print("#### Attack 2 Accuracy : : %.2f%%" %
       (100.0 * accuracy_score(membership, y_pred > 0.5)))
 
 
 ################# Attack 3
+ATTACKER_NODE_KNOWLEDGE = 0.5
+print("Attack 3 : Attacker has knowledge of subgraph")
+num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
+num_nodes_out_know = int(len(node_ids_out) * ATTACKER_NODE_KNOWLEDGE)
 
+min_know = min(num_nodes_in_know, num_nodes_out_know)
+node_ids_in_know = random.sample(list(node_ids_in), min_know)
+node_ids_out_know = random.sample(list(node_ids_out), min_know)
+membership = [1 for i in range(len(node_ids_in_know))]
+membership.extend([0 for i in range(len(node_ids_out_know))])
+
+node_ids_know = list(node_ids_in_know)
+node_ids_know.extend(node_ids_out_know)
+
+node_data_know = node_data.loc[node_ids_know, :]
+
+edgelist_know = edgelist[edgelist['target'].isin(
+    node_ids_know) | edgelist['source'].isin(node_ids_know)]
+
+G_know = sg.StellarGraph(nodes={"paper": node_data[feature_names]}, edges={
+    "cites": edgelist_know})       # node_data_know[feature_names] not used since does not matter here
+generator_noedge = FullBatchNodeGenerator(G_know, method="gcn")
+
+target_encoding = get_target_encoding(
+    node_data_know, node_label)       # To see later
+
+test_gen_noedge = generator_noedge.flow(node_data_know.index, target_encoding)
+
+pred = model.predict(test_gen_noedge)[0]
+
+losses = np.sqrt(np.sum(np.abs(pred**2 - target_encoding**2), axis=1))
+
+X = losses.reshape(-1, 1)
+y = np.array(membership)
+
+x_train, x_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3)
+
+clf = svm.SVR()
+clf.fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+print("#### Attack 3a Accuracy (losses) : %.2f%%" % (100.0 * accuracy_score(y_test, y_pred > 0.5)))
+
+X2 = pred
+x_train, x_test, y_train, y_test = train_test_split(
+    X2, y, test_size=0.3)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=300).fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+clf = svm.SVR()
+clf.fit(x_train, y_train)
+y_pred2 = clf.predict(x_test)
+print("#### Attack 3b Accuracy (preds) : {} / {}".format(100.0 * accuracy_score(y_test, y_pred > 0.5), 100.0 * accuracy_score(y_test, y_pred2 > 0.5)))
+
+X3 = np.concatenate([X, X2], axis=1)
+x_train, x_test, y_train, y_test = train_test_split(
+    X3, y, test_size=0.3)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=300).fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+clf = svm.SVR()
+clf.fit(x_train, y_train)
+y_pred2 = clf.predict(x_test)
+print("#### Attack 3c Accuracy (preds) : {} / {}".format(100.0 * accuracy_score(y_test, y_pred > 0.5), 100.0 * accuracy_score(y_test, y_pred2 > 0.5)))

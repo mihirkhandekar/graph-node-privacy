@@ -139,7 +139,7 @@ class Data:
             
             edgelist = pd.concat([edgelist, edgelist_del]).drop_duplicates(keep=False)
         else:
-            raise Exception('No such dataset')
+            raise Exception('No such dataset', self.d)
 
         return node_data, node_label, edgelist, feature_names
 
