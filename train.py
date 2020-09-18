@@ -32,11 +32,11 @@ random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
 DATASET_NAME = "cora" #"financial"
-EPOCHS = 35 #175
-IN_RATIO = 0.2 #0.01
-dropout = 0.5
-layer_sizes = [16] #[32]
-activations = ['tanh']
+EPOCHS = 20 #175
+IN_RATIO = 0.1 #0.01
+dropout = 0.
+layer_sizes = [32, 32] #[32]
+activations = ['tanh', 'tanh']
 
 SHADOW_DATASET_NAME = "citeseer"
 SHADOW_EPOCHS = 75
@@ -328,7 +328,7 @@ print("#### Attack 3a Accuracy (losses) : %.2f%%" % (100.0 * accuracy_score(y_te
 X2 = pred
 x_train, x_test, y_train, y_test = train_test_split(
     X2, y, test_size=0.3)
-clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=300).fit(x_train, y_train)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=1000).fit(x_train, y_train)
 y_pred = clf.predict(x_test)
 clf = svm.SVR()
 clf.fit(x_train, y_train)
@@ -338,9 +338,19 @@ print("#### Attack 3b Accuracy (preds) : {} / {}".format(100.0 * accuracy_score(
 X3 = np.concatenate([X, X2], axis=1)
 x_train, x_test, y_train, y_test = train_test_split(
     X3, y, test_size=0.3)
-clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=300).fit(x_train, y_train)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=1000).fit(x_train, y_train)
 y_pred = clf.predict(x_test)
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred2 = clf.predict(x_test)
 print("#### Attack 3c Accuracy (preds) : {} / {}".format(100.0 * accuracy_score(y_test, y_pred > 0.5), 100.0 * accuracy_score(y_test, y_pred2 > 0.5)))
+
+entropies = np.array(entr(pred).sum(
+    axis=-1)/np.log(pred.shape[1]))
+x_train, x_test, y_train, y_test = train_test_split(
+    entropies.reshape(-1, 1), y, test_size=0.3)
+
+clf = svm.SVR()
+clf.fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+print("#### Attack 3d Accuracy (Entropies) : %.2f%%" % (100.0 * accuracy_score(y_test, y_pred > 0.5)))
