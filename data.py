@@ -172,7 +172,7 @@ class Data:
 
 
 if __name__ == "__main__":
-    ds = Data('citeseer')
+    ds = Data('cora')
     node_data, node_label, edgelist, feature_names = ds.get_data()
-    print(edgelist)
+    print('Nodes', len(node_data.index), "Edges", len(edgelist.index))
 

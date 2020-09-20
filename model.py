@@ -14,10 +14,17 @@ if not os.path.isdir("logs"):
 
 
 class GCNModel:
-    def __init__(self, dropout=0.5, layer_sizes=[32, ], activations=['tanh']) -> None:
+    def __init__(self, dropout=0.5, layer_sizes=[32, ], activations=['tanh'], lr=0.01) -> None:
         self.dropout = dropout
         self.layer_sizes = layer_sizes
         self.activations = activations
+        self.lr = lr
+
+    def get_conv_model(self):
+        if self.gcn:
+            return self.gcn
+        else:
+            raise Exception('Model not built yet')
 
     def get_model(self, node_features, edgelist, node_ids, node_targets, val_node_ids, val_targets):
         G = sg.StellarGraph(nodes={"paper": node_features},
@@ -27,19 +34,20 @@ class GCNModel:
 
         train_gen = generator.flow(node_ids, node_targets)
 
-        gcn = GCN(              # GAT option
+        self.gcn = GCN(              # GAT option
             dropout=self.dropout,
             layer_sizes=self.layer_sizes, activations=self.activations, generator=generator
         )
 
-        x_inp, x_out = gcn.build()
-
+        x_inp, x_out = self.gcn.build()
+        #x_out = layers.Dense(32, activation="tanh")(x_out)
         predictions = layers.Dense(
             units=node_targets.shape[1], activation="softmax")(x_out)
 
         model = Model(inputs=x_inp, outputs=predictions)
+
         model.compile(
-            optimizer=optimizers.Adam(lr=0.01),
+            optimizer=optimizers.Adam(lr=self.lr),
             loss=losses.categorical_crossentropy,
             metrics=["acc"],
         )

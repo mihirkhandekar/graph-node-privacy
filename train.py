@@ -1,5 +1,3 @@
-import itertools
-import math
 import os
 import random
 from collections import Counter
@@ -11,16 +9,17 @@ import pandas as pd
 import scipy.stats as stats
 import sklearn.metrics as skmet
 import stellargraph as sg
+import tensorflow as tf
 from scipy.special import entr
 from sklearn import feature_extraction, model_selection, preprocessing, svm
 from sklearn.cluster import KMeans
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from stellargraph import datasets, globalvar
 from stellargraph.layer import GCN
 from stellargraph.mapper import FullBatchNodeGenerator
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.callbacks import ModelCheckpoint
 from xgboost import XGBClassifier, XGBRegressor
 
 from data import Data
@@ -31,20 +30,23 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "cora" #"financial"
-EPOCHS = 20 #175
-IN_RATIO = 0.1 #0.01
+DATASET_NAME = "pubmed"
+EPOCHS = 250
+IN_RATIO = 0.02
 dropout = 0.
-layer_sizes = [32, 32] #[32]
-activations = ['tanh', 'tanh']
+layer_sizes = [32,]  # [32]
+activations = ['tanh',]
 
-SHADOW_DATASET_NAME = "citeseer"
-SHADOW_EPOCHS = 75
-dropout_shadow = 0.0
-layer_sizes_shadow = [8, ]
+SHADOW_DATASET_NAME = "cora"
+SHADOW_EPOCHS = 35
+dropout_shadow = 0.5
+layer_sizes_shadow = [16, ]
 activations_shadow = ['tanh']
 
+SHADOW_RATIO = 0.5
+
 TRAIN = True
+TRAIN_SHADOW = True
 
 # Getting Graph Data
 dataset = Data(DATASET_NAME)
@@ -76,15 +78,15 @@ print('IN edges : {} (Total : {})'.format(
 # Training/Fetching GNN model
 train_data, val_data, train_targets, val_targets = get_train_data(
     node_data_in, node_label)    # Split IN data into train and validation sets
-model = GCNModel(dropout=dropout, layer_sizes=layer_sizes,
-                 activations=activations)
-model, train_gen, val_gen, generator = model.get_model(
+gcnmodel = GCNModel(dropout=dropout, layer_sizes=layer_sizes,
+                    activations=activations)
+model, train_gen, val_gen, generator = gcnmodel.get_model(
     node_data[feature_names], edgelist_in, train_data.index, train_targets, val_data.index, val_targets)
 # Although all Node IDs are used,
 # only the IN edgelist is used for training
 
 if TRAIN:
-    history = model.fit_generator(
+    history = model.fit(
         train_gen,
         epochs=EPOCHS,
         validation_data=val_gen,
@@ -146,11 +148,12 @@ cluster_centers = kmeans.cluster_centers_
 if cluster_centers[0][0] < cluster_centers[1][0]:
     y = -(y - 1)
 correct = (y == np.array(membership))
-print('#### Attack 1a Accuracy : (Node features) {} '.format(np.sum(correct)/len(correct)))
+print('#### Attack 1a Accuracy : (Node features) {} , AUC={}'.format(
+    np.sum(correct)/len(correct), roc_auc_score(membership, y)))
 
 # Attack 1b
 # , np.array(entropies[0]).reshape(-1, 1)
-X = np.concatenate([np.array(rms_loss).reshape(-1, 1)], axis=1)
+X = np.concatenate([np.array(rms_loss).reshape(-1, 1), np.array(entropies[0]).reshape(-1, 1)], axis=1)
 kmeans = KMeans(n_clusters=2, max_iter=500, n_init=15).fit(X)
 y = np.array(kmeans.labels_)
 cluster_centers = kmeans.cluster_centers_
@@ -158,7 +161,8 @@ if cluster_centers[0][0] < cluster_centers[1][0]:
     y = -(y - 1)
 assert len(y) == len(membership)
 correct = (y == np.array(membership))
-print('#### Attack 1b Accuracy : (Node features + labels) {} '.format(np.sum(correct)/len(correct)))
+print('#### Attack 1b Accuracy : (Node features + labels) {}, AUC={} '.format(
+    np.sum(correct)/len(correct), roc_auc_score(membership, y)))
 
 # 1c
 edgelist_know = edgelist[edgelist['target'].isin(
@@ -183,105 +187,107 @@ cluster_centers = kmeans.cluster_centers_
 if cluster_centers[0][0] < cluster_centers[1][0]:
     y = -(y - 1)
 correct = (y == np.array(membership))
-print('#### Attack 1c Accuracy : (Node features + edges) {} '.format(np.sum(correct)/len(correct)))
-
+print('#### Attack 1c Accuracy : (Node features + edges) {}, AUC={} '.format(
+    np.sum(correct)/len(correct), roc_auc_score(membership, y)))
 
 # Attack 2 : Shadow graph
-shadow_dataset = Data(SHADOW_DATASET_NAME)
-shadow_node_data, shadow_node_label, shadow_edgelist, shadow_feature_names = shadow_dataset.get_data()
+if TRAIN_SHADOW:
+    shadow_dataset = Data(SHADOW_DATASET_NAME)
+    shadow_node_data, shadow_node_label, shadow_edgelist, shadow_feature_names = shadow_dataset.get_data()
 
-shadow_num_nodes = len(shadow_node_data.index)
-shadow_num_edges = len(shadow_edgelist.index)
-print('Shadow Dataset {} :: Nodes : {}, Edges : {}'.format(
-    SHADOW_DATASET_NAME, shadow_num_nodes, shadow_num_edges))
+    shadow_num_nodes = len(shadow_node_data.index)
+    shadow_num_edges = len(shadow_edgelist.index)
+    print('Shadow Dataset {} :: Nodes : {}, Edges : {}'.format(
+        SHADOW_DATASET_NAME, shadow_num_nodes, shadow_num_edges))
 
-# Splitting nodes into IN and OUT
-shadow_node_ids = list(shadow_node_data.index)  # List of all index of nodes
-shadow_num_nodes_in = int(0.5 * shadow_num_nodes)
-shadow_node_ids_in = list(random.sample(shadow_node_ids, shadow_num_nodes_in))
-shadow_node_ids_out = np.setdiff1d(shadow_node_ids, shadow_node_ids_in)
-print('SHADOW IN nodes : {}, OUT nodes : {} (Total : {})'.format(
-    len(shadow_node_ids_in), len(shadow_node_ids_out), shadow_num_nodes))
-shadow_node_data_in = shadow_node_data.loc[shadow_node_ids_in, :]
-shadow_node_data_out = shadow_node_data.loc[shadow_node_ids_out, :]
+    # Splitting nodes into IN and OUT
+    shadow_node_ids = list(shadow_node_data.index)  # List of all index of nodes
+    shadow_num_nodes_in = int(SHADOW_RATIO * shadow_num_nodes)
+    shadow_node_ids_in = list(random.sample(shadow_node_ids, shadow_num_nodes_in))
+    shadow_node_ids_out = np.setdiff1d(shadow_node_ids, shadow_node_ids_in)
+    print('SHADOW IN nodes : {}, OUT nodes : {} (Total : {})'.format(
+        len(shadow_node_ids_in), len(shadow_node_ids_out), shadow_num_nodes))
+    shadow_node_data_in = shadow_node_data.loc[shadow_node_ids_in, :]
+    shadow_node_data_out = shadow_node_data.loc[shadow_node_ids_out, :]
 
-# Splitting edges into IN and OUT
-shadow_edgelist_in = shadow_edgelist[shadow_edgelist['target'].isin(
-    node_ids_in) | shadow_edgelist['source'].isin(node_ids_in)]
+    # Splitting edges into IN and OUT
+    shadow_edgelist_in = shadow_edgelist[shadow_edgelist['target'].isin(
+        node_ids_in) | shadow_edgelist['source'].isin(node_ids_in)]
 
-print('SHADOW IN edges : {}, (Total : {})'.format(
-    len(shadow_edgelist_in.index), shadow_num_edges))
+    print('SHADOW IN edges : {}, (Total : {})'.format(
+        len(shadow_edgelist_in.index), shadow_num_edges))
 
-# Training/Fetching GNN model
-shadow_train_data, shadow_val_data, shadow_train_targets, shadow_val_targets = get_train_data(
-    shadow_node_data_in, shadow_node_label)    # Split IN data into train and validation sets
+    # Training/Fetching GNN model
+    shadow_train_data, shadow_val_data, shadow_train_targets, shadow_val_targets = get_train_data(
+        shadow_node_data_in, shadow_node_label)    # Split IN data into train and validation sets
 
-shadow_model = GCNModel(dropout=dropout_shadow,
-                        layer_sizes=layer_sizes_shadow, activations=activations_shadow)
+    shadow_model = GCNModel(dropout=dropout_shadow,
+                            layer_sizes=layer_sizes_shadow, activations=activations_shadow, lr=0.01)
 
-shadow_model, shadow_train_gen, shadow_val_gen, shadow_generator = shadow_model.get_model(shadow_node_data[shadow_feature_names],
-                                                                                          shadow_edgelist_in, shadow_train_data.index,
-                                                                                          shadow_train_targets, shadow_val_data.index,
-                                                                                          shadow_val_targets)
-# Although all Node IDs are used,
-# only the IN edgelist is used for training
-history = shadow_model.fit_generator(
-    shadow_train_gen,
-    epochs=SHADOW_EPOCHS,
-    validation_data=shadow_val_gen,
-    verbose=2,
-    shuffle=False,
-    callbacks=[ModelCheckpoint("logs/best_model.h5")]
-)
-shadow_test_encoding = get_target_encoding(
-    shadow_node_data_out, shadow_node_label)
-shadow_train_encoding = get_target_encoding(
-    shadow_node_data_in, shadow_node_label)
-shadow_test_gen = shadow_generator.flow(
-    shadow_node_data_out.index, shadow_test_encoding)
-shadow_train_gen = shadow_generator.flow(
-    shadow_node_data_in.index, shadow_train_encoding)
+    shadow_model, shadow_train_gen, shadow_val_gen, shadow_generator = shadow_model.get_model(shadow_node_data[shadow_feature_names],
+                                                                                            shadow_edgelist_in, shadow_train_data.index,
+                                                                                            shadow_train_targets, shadow_val_data.index,
+                                                                                            shadow_val_targets)
+    # Although all Node IDs are used,
+    # only the IN edgelist is used for training
+    history = shadow_model.fit_generator(
+        shadow_train_gen,
+        epochs=SHADOW_EPOCHS,
+        validation_data=shadow_val_gen,
+        verbose=2,
+        shuffle=False,
+        callbacks=[ModelCheckpoint("logs/best_model.h5")]
+    )
+    shadow_test_encoding = get_target_encoding(
+        shadow_node_data_out, shadow_node_label)
+    shadow_train_encoding = get_target_encoding(
+        shadow_node_data_in, shadow_node_label)
+    shadow_test_gen = shadow_generator.flow(
+        shadow_node_data_out.index, shadow_test_encoding)
+    shadow_train_gen = shadow_generator.flow(
+        shadow_node_data_in.index, shadow_train_encoding)
 
-test_metrics = shadow_model.evaluate_generator(shadow_test_gen)
-print("\nShadow OUT Set Metrics:")
-for name, val in zip(shadow_model.metrics_names, test_metrics):
-    print("\t{}: {:0.4f}".format(name, val))
-train_metrics = shadow_model.evaluate_generator(shadow_train_gen)
-print("\nShadow IN Set Metrics:")
-for name, val in zip(shadow_model.metrics_names, train_metrics):
-    print("\t{}: {:0.4f}".format(name, val))
+    test_metrics = shadow_model.evaluate_generator(shadow_test_gen)
+    print("\nShadow OUT Set Metrics:")
+    for name, val in zip(shadow_model.metrics_names, test_metrics):
+        print("\t{}: {:0.4f}".format(name, val))
+    train_metrics = shadow_model.evaluate_generator(shadow_train_gen)
+    print("\nShadow IN Set Metrics:")
+    for name, val in zip(shadow_model.metrics_names, train_metrics):
+        print("\t{}: {:0.4f}".format(name, val))
 
-in_preds = shadow_model.predict(shadow_train_gen)
-out_preds = shadow_model.predict(shadow_test_gen)
-in_entropies = np.array(entr(in_preds).sum(
-    axis=-1)/np.log(in_preds.shape[1]))[0]
-out_entropies = np.array(entr(out_preds).sum(
-    axis=-1)/np.log(out_preds.shape[1]))[0]
+    in_preds = shadow_model.predict(shadow_train_gen)
+    out_preds = shadow_model.predict(shadow_test_gen)
 
-shadow_entropies = list(in_entropies)
-shadow_entropies.extend(out_entropies)
-shadow_entropies = np.array(shadow_entropies)
-shadow_membership = [1. for _ in range(len(in_entropies))]
-shadow_membership.extend([0. for _ in range(len(out_entropies))])
-shadow_membership = np.array(shadow_membership)
+    in_entropies = np.array(entr(in_preds).sum(
+        axis=-1)/np.log(in_preds.shape[1]))[0]
+    out_entropies = np.array(entr(out_preds).sum(
+        axis=-1)/np.log(out_preds.shape[1]))[0]
 
-x_train, x_test, y_train, y_test = train_test_split(
-    shadow_entropies.reshape(-1, 1), shadow_membership, test_size=0.2)
+    shadow_entropies = list(in_entropies)
+    shadow_entropies.extend(out_entropies)
+    shadow_entropies = np.array(shadow_entropies)
+    shadow_membership = [1. for _ in range(len(in_entropies))]
+    shadow_membership.extend([0. for _ in range(len(out_entropies))])
+    shadow_membership = np.array(shadow_membership)
+    x_train, x_test, y_train, y_test = train_test_split(
+        shadow_entropies.reshape(-1, 1), shadow_membership, test_size=0.9)
+    print('Training membership for shadow model')
 
-clf = svm.SVR()
-clf.fit(x_train, y_train)
-y_pred = clf.predict(x_test)
-print("SVM Accuracy (Attack model) : %.2f%%" %
-      (100.0 * accuracy_score(y_test, y_pred > 0.5)))
+    clf = svm.SVR(cache_size=28000)
+    clf.fit(x_train, y_train)
+    y_pred = clf.predict(x_test)
+    #print("SVM Accuracy (Attack model) : %.2f%%" %
+    #    (100.0 * accuracy_score(y_test, y_pred > 0.5)))
 
-entropies = np.array(entropies[0]).reshape(-1, 1)
-membership = np.array(membership)
-y_pred = clf.predict(entropies)
-print("#### Attack 2 Accuracy : : %.2f%%" %
-      (100.0 * accuracy_score(membership, y_pred > 0.5)))
+    entropies = np.array(entropies[0]).reshape(-1, 1)
+    membership = np.array(membership)
+    y_pred = clf.predict(entropies)
+    print("#### Attack 2 Accuracy : : %.2f%%" %
+        (100.0 * accuracy_score(membership, y_pred > 0.5)), " AUC : ", roc_auc_score(membership, y_pred))
 
 
-################# Attack 3
+# Attack 3
 ATTACKER_NODE_KNOWLEDGE = 0.5
 print("Attack 3 : Attacker has knowledge of subgraph")
 num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
@@ -323,27 +329,32 @@ x_train, x_test, y_train, y_test = train_test_split(
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred = clf.predict(x_test)
-print("#### Attack 3a Accuracy (losses) : %.2f%%" % (100.0 * accuracy_score(y_test, y_pred > 0.5)))
+print("#### Attack 3a Accuracy (losses) : %.2f%%" % (100.0 *
+                                                     accuracy_score(y_test, y_pred > 0.5)), " AUC : ", roc_auc_score(y_test, y_pred))
 
 X2 = pred
 x_train, x_test, y_train, y_test = train_test_split(
     X2, y, test_size=0.3)
-clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=1000).fit(x_train, y_train)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16),
+                    random_state=1, max_iter=1000).fit(x_train, y_train)
 y_pred = clf.predict(x_test)
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred2 = clf.predict(x_test)
-print("#### Attack 3b Accuracy (preds) : {} / {}".format(100.0 * accuracy_score(y_test, y_pred > 0.5), 100.0 * accuracy_score(y_test, y_pred2 > 0.5)))
+print("#### Attack 3b Accuracy (preds) : {} / {}, AUC={}/{}".format(100.0 * accuracy_score(y_test, y_pred > 0.5),
+                                                                    100.0 * accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
 
 X3 = np.concatenate([X, X2], axis=1)
 x_train, x_test, y_train, y_test = train_test_split(
     X3, y, test_size=0.3)
-clf = MLPClassifier(hidden_layer_sizes=(32, 16), random_state=1, max_iter=1000).fit(x_train, y_train)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16),
+                    random_state=1, max_iter=1000).fit(x_train, y_train)
 y_pred = clf.predict(x_test)
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred2 = clf.predict(x_test)
-print("#### Attack 3c Accuracy (preds) : {} / {}".format(100.0 * accuracy_score(y_test, y_pred > 0.5), 100.0 * accuracy_score(y_test, y_pred2 > 0.5)))
+print("#### Attack 3c Accuracy (preds+losses) : {} / {}, AUC={}/{}".format(100.0 * accuracy_score(y_test, y_pred > 0.5),
+                                                                           100.0 * accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
 
 entropies = np.array(entr(pred).sum(
     axis=-1)/np.log(pred.shape[1]))
@@ -353,4 +364,22 @@ x_train, x_test, y_train, y_test = train_test_split(
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred = clf.predict(x_test)
-print("#### Attack 3d Accuracy (Entropies) : %.2f%%" % (100.0 * accuracy_score(y_test, y_pred > 0.5)))
+print("#### Attack 3d Accuracy (Entropies) : %.2f%%" % (100.0 *
+                                                        accuracy_score(y_test, y_pred > 0.5)), " AUC : ", roc_auc_score(y_test, y_pred))
+
+# Attack 4 : Intermediate node representation knowledge
+layers = model.layers
+layers_output = model.layers[-2].output
+new_model = tf.compat.v1.keras.Model(model.input, layers_output)
+intermediate_outputs = model.predict(test_gen_noedge).squeeze()
+
+X = np.concatenate([intermediate_outputs, X, X2], axis=1)
+
+x_train, x_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3)
+
+clf = MLPClassifier(hidden_layer_sizes=(32, 16, 8),
+                    random_state=1, max_iter=1000).fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+print("#### Attack 4 Accuracy (White box) : {} AUC={}".format(
+    100.0 * accuracy_score(y_test, y_pred > 0.5), roc_auc_score(y_test, y_pred)))
