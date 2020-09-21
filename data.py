@@ -138,11 +138,51 @@ class Data:
                 diff)) | (edgelist['source'].isin(diff))]
             
             edgelist = pd.concat([edgelist, edgelist_del]).drop_duplicates(keep=False)
+        elif self.d == 'facebook':
+            node_data, edgelist, feature_names, node_label = self.get_facebook_data()
+        
         else:
             raise Exception('No such dataset', self.d)
+        
 
         return node_data, node_label, edgelist, feature_names
 
+
+    def get_facebook_data(self):
+        # https://github.com/benedekrozemberczki/datasets
+        edgelist = pd.read_csv(
+            os.path.join("datasets/facebook",
+                         "facebook_edges.csv"),
+            sep=",",
+            header=0,
+            names=["target", "source"],
+        )
+        feature_names = ["w_{}".format(ii) for ii in range(4714)]
+        node_data = pd.read_csv(
+            os.path.join("datasets/facebook",
+                         "features.csv"),
+            sep=",",
+            index_col=0,
+            header=0,
+            names=feature_names,
+            low_memory=False
+        )
+        node_data.index = node_data.index.astype('int32')
+        classes = pd.read_csv(
+            os.path.join("datasets/facebook",
+                         "facebook_target.csv"),
+            sep=",",
+            index_col=0,
+            header=0,
+            #usecols=['page_type']
+        )
+        classes.index = classes.index.astype('int32')
+        classes.drop(['facebook_id', 'page_name'], axis=1)
+        label_name = 'page_type'
+        node_data = node_data.join(classes)
+        return node_data, edgelist, feature_names, label_name
+
+    
     def get_financial_data(self):
         edgelist = pd.read_csv(
             os.path.join("datasets/elliptic_bitcoin_dataset",
@@ -172,7 +212,9 @@ class Data:
 
 
 if __name__ == "__main__":
-    ds = Data('cora')
+    ds = Data('facebook')
     node_data, node_label, edgelist, feature_names = ds.get_data()
     print('Nodes', len(node_data.index), "Edges", len(edgelist.index))
+    print(node_data)
+    print(edgelist)
 

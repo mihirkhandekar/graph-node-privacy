@@ -30,15 +30,15 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "pubmed"
-EPOCHS = 250
-IN_RATIO = 0.02
-dropout = 0.
-layer_sizes = [32,]  # [32]
+DATASET_NAME = "facebook"
+EPOCHS = 75
+IN_RATIO = 0.1
+dropout = 0.3
+layer_sizes = [64,]  # [32]
 activations = ['tanh',]
 
 SHADOW_DATASET_NAME = "cora"
-SHADOW_EPOCHS = 35
+SHADOW_EPOCHS = 75
 dropout_shadow = 0.5
 layer_sizes_shadow = [16, ]
 activations_shadow = ['tanh']
@@ -46,7 +46,7 @@ activations_shadow = ['tanh']
 SHADOW_RATIO = 0.5
 
 TRAIN = True
-TRAIN_SHADOW = True
+TRAIN_SHADOW = False
 
 # Getting Graph Data
 dataset = Data(DATASET_NAME)
@@ -357,9 +357,11 @@ print("#### Attack 3c Accuracy (preds+losses) : {} / {}, AUC={}/{}".format(100.0
                                                                            100.0 * accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
 
 entropies = np.array(entr(pred).sum(
-    axis=-1)/np.log(pred.shape[1]))
+    axis=-1)/np.log(pred.shape[1])).reshape(-1, 1)
+entropies = np.concatenate([entropies, X3], axis=1)
+
 x_train, x_test, y_train, y_test = train_test_split(
-    entropies.reshape(-1, 1), y, test_size=0.3)
+    entropies, y, test_size=0.3)
 
 clf = svm.SVR()
 clf.fit(x_train, y_train)
@@ -372,14 +374,16 @@ layers = model.layers
 layers_output = model.layers[-2].output
 new_model = tf.compat.v1.keras.Model(model.input, layers_output)
 intermediate_outputs = model.predict(test_gen_noedge).squeeze()
+features_know = node_data_know[feature_names].to_numpy()
 
-X = np.concatenate([intermediate_outputs, X, X2], axis=1)
+X = np.concatenate([intermediate_outputs, X, X2, entropies], axis=1)
 
 x_train, x_test, y_train, y_test = train_test_split(
     X, y, test_size=0.3)
 
-clf = MLPClassifier(hidden_layer_sizes=(32, 16, 8),
-                    random_state=1, max_iter=1000).fit(x_train, y_train)
+
+clf = MLPClassifier(hidden_layer_sizes=(16, 8),
+                    random_state=1, max_iter=1000, activation='tanh').fit(x_train, y_train)
 y_pred = clf.predict(x_test)
 print("#### Attack 4 Accuracy (White box) : {} AUC={}".format(
     100.0 * accuracy_score(y_test, y_pred > 0.5), roc_auc_score(y_test, y_pred)))
