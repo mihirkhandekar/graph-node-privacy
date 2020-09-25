@@ -30,26 +30,15 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "facebook"
-EPOCHS = 75
-IN_RATIO = 0.1
-dropout = 0.3
-layer_sizes = [64,]  # [32]
-activations = ['tanh',]
-
+DATASET_NAME = "pubmed"
 SHADOW_DATASET_NAME = "cora"
-SHADOW_EPOCHS = 75
-dropout_shadow = 0.5
-layer_sizes_shadow = [16, ]
-activations_shadow = ['tanh']
-
-SHADOW_RATIO = 0.5
 
 TRAIN = True
 TRAIN_SHADOW = False
 
 # Getting Graph Data
 dataset = Data(DATASET_NAME)
+EPOCHS, IN_RATIO, dropout, layer_sizes, activations = dataset.get_params()
 node_data, node_label, edgelist, feature_names = dataset.get_data()
 num_nodes = len(node_data.index)
 num_edges = len(edgelist.index)
@@ -110,7 +99,7 @@ else:
     model.load_weights("logs/best_model.h5")
 
 # ATTACK 1a : Attacker knowledge of node features
-ATTACKER_NODE_KNOWLEDGE = 0.5
+ATTACKER_NODE_KNOWLEDGE = 0.6
 print("Attack 1 : Attacker has knowledge of node features")
 num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
 num_nodes_out_know = int(len(node_ids_out) * ATTACKER_NODE_KNOWLEDGE)
@@ -153,7 +142,8 @@ print('#### Attack 1a Accuracy : (Node features) {} , AUC={}'.format(
 
 # Attack 1b
 # , np.array(entropies[0]).reshape(-1, 1)
-X = np.concatenate([np.array(rms_loss).reshape(-1, 1), np.array(entropies[0]).reshape(-1, 1)], axis=1)
+X = np.concatenate([np.array(rms_loss).reshape(-1, 1),
+                    np.array(entropies[0]).reshape(-1, 1)], axis=1)
 kmeans = KMeans(n_clusters=2, max_iter=500, n_init=15).fit(X)
 y = np.array(kmeans.labels_)
 cluster_centers = kmeans.cluster_centers_
@@ -193,6 +183,9 @@ print('#### Attack 1c Accuracy : (Node features + edges) {}, AUC={} '.format(
 # Attack 2 : Shadow graph
 if TRAIN_SHADOW:
     shadow_dataset = Data(SHADOW_DATASET_NAME)
+    _, _, dropout_shadow, layer_sizes_shadow, activations_shadow = shadow_dataset.get_params()
+    SHADOW_RATIO = 0.2
+    SHADOW_EPOCHS = 35
     shadow_node_data, shadow_node_label, shadow_edgelist, shadow_feature_names = shadow_dataset.get_data()
 
     shadow_num_nodes = len(shadow_node_data.index)
@@ -201,18 +194,25 @@ if TRAIN_SHADOW:
         SHADOW_DATASET_NAME, shadow_num_nodes, shadow_num_edges))
 
     # Splitting nodes into IN and OUT
-    shadow_node_ids = list(shadow_node_data.index)  # List of all index of nodes
+    # List of all index of nodes
+    shadow_node_ids = list(shadow_node_data.index)
     shadow_num_nodes_in = int(SHADOW_RATIO * shadow_num_nodes)
-    shadow_node_ids_in = list(random.sample(shadow_node_ids, shadow_num_nodes_in))
-    shadow_node_ids_out = np.setdiff1d(shadow_node_ids, shadow_node_ids_in)
+    shadow_num_nodes_out = shadow_num_nodes - shadow_num_nodes_in
+
+    mini = min(shadow_num_nodes_in, shadow_num_nodes_out)
+
+    shadow_node_ids_in = list(random.sample(
+        shadow_node_ids, mini))
+    shadow_node_ids_out = np.setdiff1d(shadow_node_ids, shadow_node_ids_in)[0:mini]
     print('SHADOW IN nodes : {}, OUT nodes : {} (Total : {})'.format(
         len(shadow_node_ids_in), len(shadow_node_ids_out), shadow_num_nodes))
+
     shadow_node_data_in = shadow_node_data.loc[shadow_node_ids_in, :]
     shadow_node_data_out = shadow_node_data.loc[shadow_node_ids_out, :]
 
     # Splitting edges into IN and OUT
     shadow_edgelist_in = shadow_edgelist[shadow_edgelist['target'].isin(
-        node_ids_in) | shadow_edgelist['source'].isin(node_ids_in)]
+        shadow_node_ids_in) | shadow_edgelist['source'].isin(shadow_node_ids_in)]
 
     print('SHADOW IN edges : {}, (Total : {})'.format(
         len(shadow_edgelist_in.index), shadow_num_edges))
@@ -225,9 +225,9 @@ if TRAIN_SHADOW:
                             layer_sizes=layer_sizes_shadow, activations=activations_shadow, lr=0.01)
 
     shadow_model, shadow_train_gen, shadow_val_gen, shadow_generator = shadow_model.get_model(shadow_node_data[shadow_feature_names],
-                                                                                            shadow_edgelist_in, shadow_train_data.index,
-                                                                                            shadow_train_targets, shadow_val_data.index,
-                                                                                            shadow_val_targets)
+                                                                                              shadow_edgelist_in, shadow_train_data.index,
+                                                                                              shadow_train_targets, shadow_val_data.index,
+                                                                                              shadow_val_targets)
     # Although all Node IDs are used,
     # only the IN edgelist is used for training
     history = shadow_model.fit_generator(
@@ -277,18 +277,18 @@ if TRAIN_SHADOW:
     clf = svm.SVR(cache_size=28000)
     clf.fit(x_train, y_train)
     y_pred = clf.predict(x_test)
-    #print("SVM Accuracy (Attack model) : %.2f%%" %
+    # print("SVM Accuracy (Attack model) : %.2f%%" %
     #    (100.0 * accuracy_score(y_test, y_pred > 0.5)))
 
     entropies = np.array(entropies[0]).reshape(-1, 1)
     membership = np.array(membership)
     y_pred = clf.predict(entropies)
     print("#### Attack 2 Accuracy : : %.2f%%" %
-        (100.0 * accuracy_score(membership, y_pred > 0.5)), " AUC : ", roc_auc_score(membership, y_pred))
+          (100.0 * accuracy_score(membership, y_pred > 0.5)), " AUC : ", roc_auc_score(membership, y_pred))
 
 
 # Attack 3
-ATTACKER_NODE_KNOWLEDGE = 0.5
+ATTACKER_NODE_KNOWLEDGE = 0.6
 print("Attack 3 : Attacker has knowledge of subgraph")
 num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
 num_nodes_out_know = int(len(node_ids_out) * ATTACKER_NODE_KNOWLEDGE)
@@ -304,8 +304,16 @@ node_ids_know.extend(node_ids_out_know)
 
 node_data_know = node_data.loc[node_ids_know, :]
 
+degree_know = []
+for node in node_data_know.index:
+    e = edgelist[(edgelist['target'] == node) | (edgelist['source'] == node)]
+    degree_know.append(len(e.index))
+
+
 edgelist_know = edgelist[edgelist['target'].isin(
     node_ids_know) | edgelist['source'].isin(node_ids_know)]
+
+print('Known data size', len(node_data_know.index), len(edgelist_know.index))
 
 G_know = sg.StellarGraph(nodes={"paper": node_data[feature_names]}, edges={
     "cites": edgelist_know})       # node_data_know[feature_names] not used since does not matter here
@@ -323,51 +331,123 @@ losses = np.sqrt(np.sum(np.abs(pred**2 - target_encoding**2), axis=1))
 X = losses.reshape(-1, 1)
 y = np.array(membership)
 
-x_train, x_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3)
+x_train, x_test, y_train, y_test, d_train, d_test = train_test_split(
+    X, y, degree_know, test_size=0.25)
 
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred = clf.predict(x_test)
-print("#### Attack 3a Accuracy (losses) : %.2f%%" % (100.0 *
-                                                     accuracy_score(y_test, y_pred > 0.5)), " AUC : ", roc_auc_score(y_test, y_pred))
+print("#### Attack 3a Accuracy (losses) : %.2f%%" % (
+    accuracy_score(y_test, y_pred > 0.5)), " AUC : ", roc_auc_score(y_test, y_pred))
+
+y_test_degrees = {'small' : [], 'big' : []}
+y_pred_degrees = {'small' : [], 'big' : []}
+for d, t, p in zip(d_test, y_test, y_pred):
+    if d in y_test_degrees:
+        y_test_degrees[d].append(t)
+        y_pred_degrees[d].append(p)
+    else:
+        y_test_degrees[d] = [t]
+        y_pred_degrees[d] = [p] 
+    if d <= 3:
+        y_test_degrees['small'].append(t)
+        y_pred_degrees['small'].append(p)
+    else:
+        y_test_degrees['big'].append(t)
+        y_pred_degrees['big'].append(p)
+
+print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
 
 X2 = pred
 x_train, x_test, y_train, y_test = train_test_split(
-    X2, y, test_size=0.3)
-clf = MLPClassifier(hidden_layer_sizes=(32, 16),
-                    random_state=1, max_iter=1000).fit(x_train, y_train)
-y_pred = clf.predict(x_test)
+    X2, y, test_size=0.25)
 clf = svm.SVR()
 clf.fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+
+clf = MLPClassifier(hidden_layer_sizes=(32,  8),
+                    random_state=1, max_iter=1500).fit(x_train, y_train)
 y_pred2 = clf.predict(x_test)
-print("#### Attack 3b Accuracy (preds) : {} / {}, AUC={}/{}".format(100.0 * accuracy_score(y_test, y_pred > 0.5),
-                                                                    100.0 * accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
+print(clf.score(x_test, y_test))
+print("#### Attack 3b Accuracy (preds) : {} / {}, AUC={}/{}".format(accuracy_score(y_test, y_pred > 0.5),
+                                                                    accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
+
+y_test_degrees = {'small' : [], 'big' : []}
+y_pred_degrees = {'small' : [], 'big' : []}
+for d, t, p in zip(d_test, y_test, y_pred):
+    if d in y_test_degrees:
+        y_test_degrees[d].append(t)
+        y_pred_degrees[d].append(p)
+    else:
+        y_test_degrees[d] = [t]
+        y_pred_degrees[d] = [p] 
+    if d <= 3:
+        y_test_degrees['small'].append(t)
+        y_pred_degrees['small'].append(p)
+    else:
+        y_test_degrees['big'].append(t)
+        y_pred_degrees['big'].append(p)
+
+"""for d, yt in y_test_degrees.items():
+    if sum(yt) != len(yt) and sum(yt) != 0 and len(yt) > 5:
+        print('Degree {}, AUC {} [len {}]'.format(d, roc_auc_score(yt, y_pred_degrees[d]), len(yt)))
+"""
+print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
 
 X3 = np.concatenate([X, X2], axis=1)
 x_train, x_test, y_train, y_test = train_test_split(
-    X3, y, test_size=0.3)
-clf = MLPClassifier(hidden_layer_sizes=(32, 16),
-                    random_state=1, max_iter=1000).fit(x_train, y_train)
-y_pred = clf.predict(x_test)
+    X3, y, test_size=0.25)
+
 clf = svm.SVR()
 clf.fit(x_train, y_train)
+y_pred = clf.predict(x_test)
+clf = MLPClassifier(hidden_layer_sizes=(32, 8),
+                    random_state=1, max_iter=1500).fit(x_train, y_train)
 y_pred2 = clf.predict(x_test)
-print("#### Attack 3c Accuracy (preds+losses) : {} / {}, AUC={}/{}".format(100.0 * accuracy_score(y_test, y_pred > 0.5),
-                                                                           100.0 * accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
+print(clf.score(x_test, y_test))
+print("#### Attack 3c Accuracy (preds+losses) : {} / {}, AUC={}/{}".format(accuracy_score(y_test, y_pred > 0.5),
+                                                                           accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
+
+y_test_degrees = {'small' : [], 'big' : []}
+y_pred_degrees = {'small' : [], 'big' : []}
+for d, t, p in zip(d_test, y_test, y_pred):
+    if d in y_test_degrees:
+        y_test_degrees[d].append(t)
+        y_pred_degrees[d].append(p)
+    else:
+        y_test_degrees[d] = [t]
+        y_pred_degrees[d] = [p] 
+    if d <= 3:
+        y_test_degrees['small'].append(t)
+        y_pred_degrees['small'].append(p)
+    else:
+        y_test_degrees['big'].append(t)
+        y_pred_degrees['big'].append(p)
+
+"""for d, yt in y_test_degrees.items():
+    if sum(yt) != len(yt) and sum(yt) != 0 and len(yt) > 5:
+        print('Degree {}, AUC {} [len {}]'.format(d, roc_auc_score(yt, y_pred_degrees[d]), len(yt)))"""
+print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
+
 
 entropies = np.array(entr(pred).sum(
     axis=-1)/np.log(pred.shape[1])).reshape(-1, 1)
 entropies = np.concatenate([entropies, X3], axis=1)
 
 x_train, x_test, y_train, y_test = train_test_split(
-    entropies, y, test_size=0.3)
+    entropies, y, test_size=0.25)
 
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred = clf.predict(x_test)
-print("#### Attack 3d Accuracy (Entropies) : %.2f%%" % (100.0 *
-                                                        accuracy_score(y_test, y_pred > 0.5)), " AUC : ", roc_auc_score(y_test, y_pred))
+
+clf = MLPClassifier(hidden_layer_sizes=(32, 8),
+                    random_state=1, max_iter=1500).fit(x_train, y_train)
+y_pred2 = clf.predict(x_test)
+print(clf.score(x_test, y_test))
+
+print("#### Attack 3d Accuracy (Entropies) : {}/{}, AUC={}/{}".format(accuracy_score(y_test, y_pred > 0.5),
+                                                                      accuracy_score(y_test, y_pred2 > 0.5), roc_auc_score(y_test, y_pred), roc_auc_score(y_test, y_pred2)))
 
 # Attack 4 : Intermediate node representation knowledge
 layers = model.layers
@@ -379,11 +459,11 @@ features_know = node_data_know[feature_names].to_numpy()
 X = np.concatenate([intermediate_outputs, X, X2, entropies], axis=1)
 
 x_train, x_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3)
+    X, y, test_size=0.25)
 
 
-clf = MLPClassifier(hidden_layer_sizes=(16, 8),
-                    random_state=1, max_iter=1000, activation='tanh').fit(x_train, y_train)
+clf = MLPClassifier(hidden_layer_sizes=(32, 16, 8),
+                    random_state=1, max_iter=1500, activation='tanh').fit(x_train, y_train)
 y_pred = clf.predict(x_test)
 print("#### Attack 4 Accuracy (White box) : {} AUC={}".format(
     100.0 * accuracy_score(y_test, y_pred > 0.5), roc_auc_score(y_test, y_pred)))

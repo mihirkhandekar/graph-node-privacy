@@ -6,10 +6,48 @@ import networkx as nx
 import pandas as pd
 from stellargraph import datasets, globalvar
 import numpy as np
+import random
+
+NUM_NODES = 10000
+NUM_EDGES = 20000
+FEATURE_SIZE = 100
+NUM_CLASSES = 5
 
 class Data:
     def __init__(self, d) -> None:
         self.d = d
+
+    def load_er(self, num_nodes=NUM_NODES, num_edges=NUM_EDGES, feature_size=FEATURE_SIZE, num_classes=NUM_CLASSES):
+        G = nx.gnm_random_graph(num_nodes, num_edges)
+        nodes = G.nodes
+        indices = []
+        features = [[] for _ in range(feature_size)]
+        labels = []
+        for node in nodes:
+            indices.append(node)
+            for i in range(feature_size):
+                features[i].append(np.random.randint(2))
+            correct_label = np.random.randint(num_classes)
+            labels.append(correct_label)
+        
+        feature_names = ["w_{}".format(ii) for ii in range(feature_size)]
+        data = {}
+        for i, name in enumerate(feature_names):
+            data[name] = features[i]
+        data['label'] = labels
+        node_data = pd.DataFrame(data, columns = feature_names + ['label'], index=indices)
+        node_label = 'label'
+        edge1 = []
+        edge2 = []
+        for edge in G.edges:
+            edge1.append(edge[0])
+            edge2.append(edge[1])
+        data = {'source' : edge1, 'target': edge2}
+        edgelist = pd.DataFrame(data, columns=['source', 'target'])
+        return node_data, node_label, edgelist, feature_names
+
+
+
 
     def load_pubmed(self, data_dir):
         edgelist = pd.read_csv(
@@ -107,6 +145,9 @@ class Data:
             node_data, classes, edgelist, feature_names = self.get_financial_data()
             node_data = node_data.join(classes)
             node_label = 'class'
+        elif self.d == 'er':
+            # Download to datasets/ folder using command `kaggle datasets download -d ellipticco/elliptic-data-set`
+            node_data, node_label, edgelist, feature_names = self.load_er()
         elif self.d == 'citeseer':
             dataset = datasets.CiteSeer()
             dataset.download()
@@ -210,9 +251,44 @@ class Data:
         )
         return node_data, classes, edgelist, feature_names
 
+    def get_params(self):
+        if self.d == 'facebook':
+            epochs = 50
+            in_ratio = 0.02
+            dropout = 0.
+            layer_sizes = [64, ]
+            activations = ['tanh', ]
+        elif self.d == 'cora':
+            epochs = 35
+            in_ratio = 0.2
+            dropout = 0.
+            layer_sizes = [16, ]
+            activations = ['tanh', ]
+        elif self.d == 'citeseer':
+            epochs = 50
+            in_ratio = 0.3
+            dropout = 0
+            layer_sizes = [32, ]
+            activations = ['tanh', ]
+        elif self.d == 'pubmed':
+            epochs = 250
+            in_ratio = 0.03
+            dropout = 0.
+            layer_sizes = [32, ]
+            activations = ['tanh', ]
+        elif self.d == 'financial':
+            epochs = 500
+            in_ratio = 0.01
+            dropout = 0.
+            layer_sizes = [32, ]
+            activations = ['tanh', ]
+
+
+        return epochs, in_ratio, dropout, layer_sizes, activations
+
 
 if __name__ == "__main__":
-    ds = Data('facebook')
+    ds = Data('er')
     node_data, node_label, edgelist, feature_names = ds.get_data()
     print('Nodes', len(node_data.index), "Edges", len(edgelist.index))
     print(node_data)
