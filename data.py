@@ -263,10 +263,10 @@ class Data:
             in_ratio = 0.2
             dropout = 0.
             layer_sizes = [16, ]
-            activations = ['tanh', ]
+            activations = ['tanh']
         elif self.d == 'citeseer':
             epochs = 50
-            in_ratio = 0.3
+            in_ratio = 0.2
             dropout = 0
             layer_sizes = [32, ]
             activations = ['tanh', ]

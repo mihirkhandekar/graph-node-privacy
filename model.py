@@ -36,7 +36,7 @@ class GCNModel:
 
         self.gcn = GCN(              # GAT option
             dropout=self.dropout,
-            layer_sizes=self.layer_sizes, activations=self.activations, generator=generator
+            layer_sizes=self.layer_sizes, activations=self.activations, generator=generator,# kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
         )
 
         x_inp, x_out = self.gcn.build()

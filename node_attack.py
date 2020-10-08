@@ -369,7 +369,6 @@ plt.savefig('plots/rocauc_big')
 plt.clf()
 plt.cla()
 
-exit()
 vals = y_pred == y_test
 tr_d = {}
 for v, ct in zip(vals, c_test):

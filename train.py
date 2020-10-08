@@ -21,6 +21,7 @@ from stellargraph.layer import GCN
 from stellargraph.mapper import FullBatchNodeGenerator
 from tensorflow.keras.callbacks import ModelCheckpoint
 from xgboost import XGBClassifier, XGBRegressor
+from plot import plot_rocauc, create_label_ratio_plot
 
 from data import Data
 from model import GCNModel, get_target_encoding, get_train_data
@@ -30,7 +31,7 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "pubmed"
+DATASET_NAME = "cora"
 SHADOW_DATASET_NAME = "cora"
 
 TRAIN = True
@@ -99,7 +100,7 @@ else:
     model.load_weights("logs/best_model.h5")
 
 # ATTACK 1a : Attacker knowledge of node features
-ATTACKER_NODE_KNOWLEDGE = 0.6
+ATTACKER_NODE_KNOWLEDGE = 0.1
 print("Attack 1 : Attacker has knowledge of node features")
 num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
 num_nodes_out_know = int(len(node_ids_out) * ATTACKER_NODE_KNOWLEDGE)
@@ -288,7 +289,7 @@ if TRAIN_SHADOW:
 
 
 # Attack 3
-ATTACKER_NODE_KNOWLEDGE = 0.6
+# ATTACKER_NODE_KNOWLEDGE = 0.6
 print("Attack 3 : Attacker has knowledge of subgraph")
 num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
 num_nodes_out_know = int(len(node_ids_out) * ATTACKER_NODE_KNOWLEDGE)
@@ -331,8 +332,16 @@ losses = np.sqrt(np.sum(np.abs(pred**2 - target_encoding**2), axis=1))
 X = losses.reshape(-1, 1)
 y = np.array(membership)
 
-x_train, x_test, y_train, y_test, d_train, d_test = train_test_split(
-    X, y, degree_know, test_size=0.25)
+labels = node_data_know[node_label].to_numpy()
+label_counts = dict()
+for i in labels:
+  label_counts[i] = label_counts.get(i, 0) + 1
+
+for k, v in label_counts.items():
+    label_counts[k] = v/len(labels)
+
+x_train, x_test, y_train, y_test, d_train, d_test, l_train, l_test = train_test_split(
+    X, y, degree_know, labels, test_size=0.25)
 
 clf = svm.SVR()
 clf.fit(x_train, y_train)
@@ -342,7 +351,10 @@ print("#### Attack 3a Accuracy (losses) : %.2f%%" % (
 
 y_test_degrees = {'small' : [], 'big' : []}
 y_pred_degrees = {'small' : [], 'big' : []}
-for d, t, p in zip(d_test, y_test, y_pred):
+y_test_lab = {}
+y_pred_lab = {}
+
+for d, t, p, l in zip(d_test, y_test, y_pred, l_test):
     if d in y_test_degrees:
         y_test_degrees[d].append(t)
         y_pred_degrees[d].append(p)
@@ -355,12 +367,36 @@ for d, t, p in zip(d_test, y_test, y_pred):
     else:
         y_test_degrees['big'].append(t)
         y_pred_degrees['big'].append(p)
+    if l in y_test_lab:
+        y_test_lab[l].append(t)
+        y_pred_lab[l].append(p)
+    else:
+        y_test_lab[l] = [t]
+        y_pred_lab[l] = [p]
+
+
 
 print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
 
+plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/3a_small_rocauc')
+plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/3a_big_rocauc')
+
+plt_labels = []
+plt_scores = []
+plt_ratio = []
+for lab, tru in y_test_lab.items():
+    print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
+    plt_labels.append(lab)
+    plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
+    plt_ratio.append(round(label_counts[lab], 3))
+
+create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name=DATASET_NAME + '/3a_labels')
+
+
+##################### 3b
 X2 = pred
-x_train, x_test, y_train, y_test = train_test_split(
-    X2, y, test_size=0.25)
+x_train, x_test, y_train, y_test, d_train, d_test, l_train, l_test = train_test_split(
+    X, y, degree_know, labels, test_size=0.25)
 clf = svm.SVR()
 clf.fit(x_train, y_train)
 y_pred = clf.predict(x_test)
@@ -393,10 +429,14 @@ for d, t, p in zip(d_test, y_test, y_pred):
         print('Degree {}, AUC {} [len {}]'.format(d, roc_auc_score(yt, y_pred_degrees[d]), len(yt)))
 """
 print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
+plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/3b_small_rocauc')
+plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/3b_big_rocauc')
 
+
+############# 3c
 X3 = np.concatenate([X, X2], axis=1)
-x_train, x_test, y_train, y_test = train_test_split(
-    X3, y, test_size=0.25)
+x_train, x_test, y_train, y_test, d_train, d_test, l_train, l_test = train_test_split(
+    X, y, degree_know, labels, test_size=0.25)
 
 clf = svm.SVR()
 clf.fit(x_train, y_train)
@@ -410,7 +450,10 @@ print("#### Attack 3c Accuracy (preds+losses) : {} / {}, AUC={}/{}".format(accur
 
 y_test_degrees = {'small' : [], 'big' : []}
 y_pred_degrees = {'small' : [], 'big' : []}
-for d, t, p in zip(d_test, y_test, y_pred):
+y_test_lab = {}
+y_pred_lab = {}
+
+for d, t, p, l in zip(d_test, y_test, y_pred, l_test):
     if d in y_test_degrees:
         y_test_degrees[d].append(t)
         y_pred_degrees[d].append(p)
@@ -423,19 +466,41 @@ for d, t, p in zip(d_test, y_test, y_pred):
     else:
         y_test_degrees['big'].append(t)
         y_pred_degrees['big'].append(p)
+    if l in y_test_lab:
+        y_test_lab[l].append(t)
+        y_pred_lab[l].append(p)
+    else:
+        y_test_lab[l] = [t]
+        y_pred_lab[l] = [p]
+
 
 """for d, yt in y_test_degrees.items():
     if sum(yt) != len(yt) and sum(yt) != 0 and len(yt) > 5:
         print('Degree {}, AUC {} [len {}]'.format(d, roc_auc_score(yt, y_pred_degrees[d]), len(yt)))"""
 print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
+plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/3c_small_rocauc')
+plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/3c_big_rocauc')
+
+plt_labels = []
+plt_scores = []
+plt_ratio = []
+for lab, tru in y_test_lab.items():
+    print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
+    plt_labels.append(lab)
+    plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
+    plt_ratio.append(round(label_counts[lab], 3))
 
 
+create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name=DATASET_NAME + '/3c_labels')
+
+
+################# 3d
 entropies = np.array(entr(pred).sum(
     axis=-1)/np.log(pred.shape[1])).reshape(-1, 1)
 entropies = np.concatenate([entropies, X3], axis=1)
 
-x_train, x_test, y_train, y_test = train_test_split(
-    entropies, y, test_size=0.25)
+x_train, x_test, y_train, y_test, d_train, d_test, l_train, l_test = train_test_split(
+    X, y, degree_know, labels, test_size=0.25)
 
 clf = svm.SVR()
 clf.fit(x_train, y_train)
