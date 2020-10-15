@@ -47,8 +47,6 @@ class Data:
         return node_data, node_label, edgelist, feature_names
 
 
-
-
     def load_pubmed(self, data_dir):
         edgelist = pd.read_csv(
             os.path.join(data_dir, "Pubmed-Diabetes.DIRECTED.cites.tab"),

@@ -40,7 +40,6 @@ class GCNModel:
         )
 
         x_inp, x_out = self.gcn.build()
-        #x_out = layers.Dense(32, activation="tanh")(x_out)
         predictions = layers.Dense(
             units=node_targets.shape[1], activation="softmax")(x_out)
 

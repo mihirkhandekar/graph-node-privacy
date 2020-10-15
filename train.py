@@ -13,6 +13,7 @@ import tensorflow as tf
 from scipy.special import entr
 from sklearn import feature_extraction, model_selection, preprocessing, svm
 from sklearn.cluster import KMeans
+from sklearn.cluster import SpectralClustering, AgglomerativeClustering
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
@@ -31,7 +32,7 @@ np.random.seed(SEED)
 random.seed(SEED)
 os.environ['PYTHONHASHSEED'] = str(SEED)
 
-DATASET_NAME = "cora"
+DATASET_NAME = "pubmed"
 SHADOW_DATASET_NAME = "cora"
 
 TRAIN = True
@@ -100,7 +101,7 @@ else:
     model.load_weights("logs/best_model.h5")
 
 # ATTACK 1a : Attacker knowledge of node features
-ATTACKER_NODE_KNOWLEDGE = 0.1
+ATTACKER_NODE_KNOWLEDGE = 0.6
 print("Attack 1 : Attacker has knowledge of node features")
 num_nodes_in_know = int(len(node_ids_in) * ATTACKER_NODE_KNOWLEDGE)
 num_nodes_out_know = int(len(node_ids_out) * ATTACKER_NODE_KNOWLEDGE)
@@ -117,6 +118,18 @@ node_ids_know.extend(node_ids_out_know)
 node_data_know = node_data.loc[node_ids_know, :]
 print('Attacker knowledge :: Nodes : {} {} (Should be equal)'.format(
     len(node_data_know.index), len(membership)))
+labels = node_data_know[node_label].to_numpy()
+label_counts = dict()
+for i in labels:
+  label_counts[i] = label_counts.get(i, 0) + 1
+
+for k, v in label_counts.items():
+    label_counts[k] = v/len(labels)
+
+degree_know = []
+for node in node_data_know.index:
+    e = edgelist[(edgelist['target'] == node) | (edgelist['source'] == node)]
+    degree_know.append(len(e.index))
 
 edgelist_noedge = edgelist[0:0]
 G_know = sg.StellarGraph(nodes={"paper": node_data[feature_names]}, edges={
@@ -125,11 +138,14 @@ generator_noedge = FullBatchNodeGenerator(G_know, method="gcn")
 target_encoding = get_target_encoding(
     node_data_know, node_label)       # To see later
 
+
 test_gen_noedge = generator_noedge.flow(node_data_know.index, target_encoding)
 y = model.predict(test_gen_noedge)
+y_p = np.array(y)
 squared = np.square(y[0] - target_encoding)
 rms_loss = np.sqrt(np.sum(squared, axis=1) * (1/np.array(y).shape[1]))
 entropies = entr(y).sum(axis=-1)/np.log(y.shape[1])
+
 
 X = np.array(entropies[0]).T
 kmeans = KMeans(n_clusters=2, max_iter=500, n_init=15).fit(X.reshape(-1, 1))
@@ -141,10 +157,48 @@ correct = (y == np.array(membership))
 print('#### Attack 1a Accuracy : (Node features) {} , AUC={}'.format(
     np.sum(correct)/len(correct), roc_auc_score(membership, y)))
 
+
+y_test_degrees = {'small' : [], 'big' : []}
+y_pred_degrees = {'small' : [], 'big' : []}
+y_test_lab = {}
+y_pred_lab = {}
+
+for d, t, p, l in zip(degree_know, membership, y, labels):
+    if d <= 3:
+        y_test_degrees['small'].append(t)
+        y_pred_degrees['small'].append(p)
+    else:
+        y_test_degrees['big'].append(t)
+        y_pred_degrees['big'].append(p)
+    if l in y_test_lab:
+        y_test_lab[l].append(t)
+        y_pred_lab[l].append(p)
+    else:
+        y_test_lab[l] = [t]
+        y_pred_lab[l] = [p]
+
+print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
+plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/1a_small_rocauc')
+plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/1a_big_rocauc')
+plt_labels = []
+plt_scores = []
+plt_ratio = []
+for lab, tru in y_test_lab.items():
+    if len(y_test_lab[lab]) < 2:
+        continue
+    print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
+    plt_labels.append(lab)
+    plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
+    plt_ratio.append(round(label_counts[lab], 3))
+
+
+create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name=DATASET_NAME + '/1a_labels')
+
+
+
 # Attack 1b
 # , np.array(entropies[0]).reshape(-1, 1)
-X = np.concatenate([np.array(rms_loss).reshape(-1, 1),
-                    np.array(entropies[0]).reshape(-1, 1)], axis=1)
+X = np.concatenate([np.array(rms_loss).reshape(-1, 1)], axis=1)
 kmeans = KMeans(n_clusters=2, max_iter=500, n_init=15).fit(X)
 y = np.array(kmeans.labels_)
 cluster_centers = kmeans.cluster_centers_
@@ -154,6 +208,43 @@ assert len(y) == len(membership)
 correct = (y == np.array(membership))
 print('#### Attack 1b Accuracy : (Node features + labels) {}, AUC={} '.format(
     np.sum(correct)/len(correct), roc_auc_score(membership, y)))
+
+y_test_degrees = {'small' : [], 'big' : []}
+y_pred_degrees = {'small' : [], 'big' : []}
+y_test_lab = {}
+y_pred_lab = {}
+
+for d, t, p, l in zip(degree_know, membership, y, labels):
+    if d <= 3:
+        y_test_degrees['small'].append(t)
+        y_pred_degrees['small'].append(p)
+    else:
+        y_test_degrees['big'].append(t)
+        y_pred_degrees['big'].append(p)
+    if l in y_test_lab:
+        y_test_lab[l].append(t)
+        y_pred_lab[l].append(p)
+    else:
+        y_test_lab[l] = [t]
+        y_pred_lab[l] = [p]
+
+print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
+plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/1b_small_rocauc')
+plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/1b_big_rocauc')
+plt_labels = []
+plt_scores = []
+plt_ratio = []
+for lab, tru in y_test_lab.items():
+    if len(y_test_lab[lab]) < 2:
+        continue
+    print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
+    plt_labels.append(lab)
+    plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
+    plt_ratio.append(round(label_counts[lab], 3))
+
+
+create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name=DATASET_NAME + '/1b_labels')
+
 
 # 1c
 edgelist_know = edgelist[edgelist['target'].isin(
@@ -171,8 +262,9 @@ squared = np.square(y[0] - target_encoding)
 rms_loss = np.sqrt(np.sum(squared, axis=1) * (1/np.array(y).shape[1]))
 entropies = entr(y).sum(axis=-1)/np.log(y.shape[1])
 
-X = np.array(entropies[0]).T
-kmeans = KMeans(n_clusters=2, max_iter=500, n_init=15).fit(X.reshape(-1, 1))
+# , np.array(entropies[0]).reshape(-1, 1)
+X = np.concatenate([np.array(rms_loss).reshape(-1, 1)], axis=1)
+kmeans = KMeans(n_clusters=2, max_iter=500, n_init=15).fit(X)
 y = np.array(kmeans.labels_)
 cluster_centers = kmeans.cluster_centers_
 if cluster_centers[0][0] < cluster_centers[1][0]:
@@ -180,6 +272,44 @@ if cluster_centers[0][0] < cluster_centers[1][0]:
 correct = (y == np.array(membership))
 print('#### Attack 1c Accuracy : (Node features + edges) {}, AUC={} '.format(
     np.sum(correct)/len(correct), roc_auc_score(membership, y)))
+
+y_test_degrees = {'small' : [], 'big' : []}
+y_pred_degrees = {'small' : [], 'big' : []}
+y_test_lab = {}
+y_pred_lab = {}
+
+for d, t, p, l in zip(degree_know, membership, y, labels):
+    if d <= 3:
+        y_test_degrees['small'].append(t)
+        y_pred_degrees['small'].append(p)
+    else:
+        y_test_degrees['big'].append(t)
+        y_pred_degrees['big'].append(p)
+    if l in y_test_lab:
+        y_test_lab[l].append(t)
+        y_pred_lab[l].append(p)
+    else:
+        y_test_lab[l] = [t]
+        y_pred_lab[l] = [p]
+
+print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
+plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/1c_small_rocauc')
+plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/1c_big_rocauc')
+plt_labels = []
+plt_scores = []
+plt_ratio = []
+for lab, tru in y_test_lab.items():
+    if len(y_test_lab[lab]) < 2:
+        continue
+    print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
+    plt_labels.append(lab)
+    plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
+    plt_ratio.append(round(label_counts[lab], 3))
+
+
+create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name=DATASET_NAME + '/1c_labels')
+
+
 
 # Attack 2 : Shadow graph
 if TRAIN_SHADOW:
@@ -384,14 +514,16 @@ plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/3a_bi
 plt_labels = []
 plt_scores = []
 plt_ratio = []
-for lab, tru in y_test_lab.items():
+'''for lab, tru in y_test_lab.items():
+    if len(y_test_lab[lab]) < 2:
+        continue
     print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
     plt_labels.append(lab)
     plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
     plt_ratio.append(round(label_counts[lab], 3))
 
 create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name=DATASET_NAME + '/3a_labels')
-
+'''
 
 ##################### 3b
 X2 = pred
@@ -424,10 +556,7 @@ for d, t, p in zip(d_test, y_test, y_pred):
         y_test_degrees['big'].append(t)
         y_pred_degrees['big'].append(p)
 
-"""for d, yt in y_test_degrees.items():
-    if sum(yt) != len(yt) and sum(yt) != 0 and len(yt) > 5:
-        print('Degree {}, AUC {} [len {}]'.format(d, roc_auc_score(yt, y_pred_degrees[d]), len(yt)))
-"""
+
 print('SMALL AUC {}, HIGH AUC {}'.format(roc_auc_score(y_test_degrees['small'], y_pred_degrees['small']), roc_auc_score(y_test_degrees['big'], y_pred_degrees['big'])))
 plot_rocauc(y_test_degrees['small'], y_pred_degrees['small'], DATASET_NAME + '/3b_small_rocauc')
 plot_rocauc(y_test_degrees['big'], y_pred_degrees['big'], DATASET_NAME + '/3b_big_rocauc')
@@ -485,6 +614,8 @@ plt_labels = []
 plt_scores = []
 plt_ratio = []
 for lab, tru in y_test_lab.items():
+    if len(y_test_lab[lab]) < 2:
+        continue
     print('*', lab, roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), label_counts[lab])
     plt_labels.append(lab)
     plt_scores.append(round(roc_auc_score(y_test_lab[lab], y_pred_lab[lab]), 3))
