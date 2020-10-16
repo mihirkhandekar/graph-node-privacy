@@ -4,3 +4,7 @@ stellargraph/
 datasets/
 .vscode/
 **.h5
+**.png
+__pycache__/
+logs/
+plots/

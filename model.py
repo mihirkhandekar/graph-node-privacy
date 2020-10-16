@@ -26,18 +26,23 @@ class GCNModel:
         else:
             raise Exception('Model not built yet')
 
-    def get_model(self, node_features, edgelist, node_ids, node_targets, val_node_ids, val_targets):
+    def get_model(self, node_features, edgelist, node_ids, node_targets, val_node_ids, val_targets, method='gcn'):
         G = sg.StellarGraph(nodes={"paper": node_features},
                             edges={"cites": edgelist})
 
-        generator = FullBatchNodeGenerator(G, method="gcn")
+        generator = FullBatchNodeGenerator(G, method=method)
 
         train_gen = generator.flow(node_ids, node_targets)
 
-        self.gcn = GCN(              # GAT option
-            dropout=self.dropout,
-            layer_sizes=self.layer_sizes, activations=self.activations, generator=generator,# kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
-        )
+        if method == 'gcn':
+            self.gcn = GCN(              # GAT option
+                dropout=self.dropout,
+                layer_sizes=self.layer_sizes, activations=self.activations, generator=generator,# kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
+            )
+        else:
+            self.gcn = GAT(              # GAT option
+                layer_sizes=self.layer_sizes, activations=self.activations, generator=generator,# kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
+            )
 
         x_inp, x_out = self.gcn.build()
         predictions = layers.Dense(
