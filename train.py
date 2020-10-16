@@ -1,4 +1,6 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1' 
+
 import random
 from collections import Counter
 
@@ -26,6 +28,7 @@ from plot import plot_rocauc, create_label_ratio_plot
 
 from data import Data
 from model import GCNModel, get_target_encoding, get_train_data
+#tf.get_logger().setLevel('WARNING')
 
 SEED = 10
 np.random.seed(SEED)
@@ -81,21 +84,15 @@ if TRAIN:
         train_gen,
         epochs=EPOCHS,
         validation_data=val_gen,
-        verbose=2,
+        verbose=0,
         shuffle=False,
         callbacks=[ModelCheckpoint("logs/best_model.h5")]
     )
     target_encoding = get_target_encoding(node_data_out, node_label)
     test_gen = generator.flow(node_data_out.index, target_encoding)
 
-    test_metrics = model.evaluate_generator(test_gen)
-    print("\nOUT Set Metrics:")
-    for name, val in zip(model.metrics_names, test_metrics):
-        print("\t{}: {:0.4f}".format(name, val))
-    train_metrics = model.evaluate_generator(train_gen)
-    print("\nIN Set Metrics:")
-    for name, val in zip(model.metrics_names, train_metrics):
-        print("\t{}: {:0.4f}".format(name, val))
+    print("\nOUT Set Metrics:", model.metrics_names, model.evaluate_generator(test_gen))
+    print("\nIN Set Metrics:", model.metrics_names, model.evaluate_generator(train_gen))
 
 else:
     model.load_weights("logs/best_model.h5")
@@ -365,7 +362,7 @@ if TRAIN_SHADOW:
         shadow_train_gen,
         epochs=SHADOW_EPOCHS,
         validation_data=shadow_val_gen,
-        verbose=2,
+        verbose=1,
         shuffle=False,
         callbacks=[ModelCheckpoint("logs/best_model.h5")]
     )
