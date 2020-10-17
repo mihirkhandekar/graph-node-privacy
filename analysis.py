@@ -48,7 +48,7 @@ method = 'gcn'
 
 TRAIN = True
 TRAIN_SHADOW = False
-seq_epochs = {'citeseer': 25, 'cora': 35}
+seq_epochs = {'citeseer': 25, 'cora': 35, 'facebook':35}
 
 def load_and_train_model(dataset_name, test_acc_graph, degrees, neighbours):
     # Getting Graph Data
@@ -279,6 +279,10 @@ attack_auc_seq = {}
 test_acc_seq = {}
 attack_auc_graph = {}
 test_acc_graph = {}
+attack_auc_seqs = []
+test_acc_seqs = []
+attack_auc_graphs = []
+test_acc_graphs = []
 degrees = {}
 neighbours = {}
 
@@ -311,9 +315,13 @@ for _ in range(num_rounds):
                             model_name, edgelist, node_data, attack_auc_seq, test_acc_seq)
 
         print('Sequential Attack AUC', attack_auc_seq)
+        attack_auc_seqs.append(attack_auc_seq)
         print('Sequential Model accuracy', test_acc_seq)
+        test_acc_seqs.append(test_acc_seq)
         print('Graph Attack AUC', attack_auc_graph)
+        attack_auc_graphs.append(attack_auc_graph)
         print('Graph Model accuracy', test_acc_graph)
+        test_acc_graphs.append(test_acc_graph)
 
         with open('records/dataset/{}_index_real_mem.json'.format(model_name), 'w') as f, open('records/dataset/{}_index_pred_mem.json'.format(model_name), 'w') as f2, open('records/dataset/{}_index_loss.json'.format(model_name), 'w') as f3:
             json.dump(index_real_mem[model_name], f)
@@ -326,9 +334,9 @@ for _ in range(num_rounds):
             json.dump(loss_thresholds[model_name], f3)
 
         with open('records/attack_auc_seq.json', 'w') as f_attack_auc_seq, open('records/test_acc_seq.json', 'w') as f_test_acc_seq, open('records/attack_auc_graph.json', 'w') as f_attack_auc_graph, open('records/test_acc_graph.json', 'w') as f_test_acc_graph:
-            json.dump(attack_auc_seq, f_attack_auc_seq)
-            json.dump(test_acc_seq, f_test_acc_seq)
-            json.dump(attack_auc_graph, f_attack_auc_graph)
-            json.dump(test_acc_graph, f_test_acc_graph)
+            json.dump(attack_auc_seqs, f_attack_auc_seq)
+            json.dump(test_acc_seqs, f_test_acc_seq)
+            json.dump(attack_auc_graphs, f_attack_auc_graph)
+            json.dump(test_acc_graphs, f_test_acc_graph)
 
 
