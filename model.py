@@ -35,7 +35,7 @@ class GCNModel:
         train_gen = generator.flow(node_ids, node_targets)
 
         if method == 'gcn':
-            self.gcn = GCN(              # GAT option
+            self.gcn = GCN(             
                 dropout=self.dropout,
                 layer_sizes=self.layer_sizes, activations=self.activations, generator=generator,# kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
             )
