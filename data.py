@@ -1,17 +1,18 @@
 import itertools
 import os
+import random
 from platform import node
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 from stellargraph import datasets, globalvar
-import numpy as np
-import random
 
 NUM_NODES = 10000
 NUM_EDGES = 20000
 FEATURE_SIZE = 100
 NUM_CLASSES = 5
+
 
 class Data:
     def __init__(self, d) -> None:
@@ -29,23 +30,23 @@ class Data:
                 features[i].append(np.random.randint(2))
             correct_label = np.random.randint(num_classes)
             labels.append(correct_label)
-        
+
         feature_names = ["w_{}".format(ii) for ii in range(feature_size)]
         data = {}
         for i, name in enumerate(feature_names):
             data[name] = features[i]
         data['label'] = labels
-        node_data = pd.DataFrame(data, columns = feature_names + ['label'], index=indices)
+        node_data = pd.DataFrame(
+            data, columns=feature_names + ['label'], index=indices)
         node_label = 'label'
         edge1 = []
         edge2 = []
         for edge in G.edges:
             edge1.append(edge[0])
             edge2.append(edge[1])
-        data = {'source' : edge1, 'target': edge2}
+        data = {'source': edge1, 'target': edge2}
         edgelist = pd.DataFrame(data, columns=['source', 'target'])
         return node_data, node_label, edgelist, feature_names
-
 
     def load_pubmed(self, data_dir):
         edgelist = pd.read_csv(
@@ -171,21 +172,20 @@ class Data:
             all_targets = edgelist['target'].tolist()
             edge_nodes = list(set(all_sources + all_targets))
             feature_nodes = list(node_data.index)
-            
-            diff = list(np.setdiff1d(edge_nodes, feature_nodes)) 
+
+            diff = list(np.setdiff1d(edge_nodes, feature_nodes))
             edgelist_del = edgelist[(edgelist['target'].isin(
                 diff)) | (edgelist['source'].isin(diff))]
-            
-            edgelist = pd.concat([edgelist, edgelist_del]).drop_duplicates(keep=False)
+
+            edgelist = pd.concat([edgelist, edgelist_del]
+                                 ).drop_duplicates(keep=False)
         elif self.d == 'facebook':
             node_data, edgelist, feature_names, node_label = self.get_facebook_data()
-        
+
         else:
             raise Exception('No such dataset', self.d)
-        
 
         return node_data, node_label, edgelist, feature_names
-
 
     def get_facebook_data(self):
         # https://github.com/benedekrozemberczki/datasets
@@ -213,7 +213,7 @@ class Data:
             sep=",",
             index_col=0,
             header=0,
-            #usecols=['page_type']
+            # usecols=['page_type']
         )
         classes.index = classes.index.astype('int32')
         classes.drop(['facebook_id', 'page_name'], axis=1)
@@ -221,7 +221,6 @@ class Data:
         node_data = node_data.join(classes)
         return node_data, edgelist, feature_names, label_name
 
-    
     def get_financial_data(self):
         edgelist = pd.read_csv(
             os.path.join("datasets/elliptic_bitcoin_dataset",
@@ -281,7 +280,6 @@ class Data:
             layer_sizes = [32, ]
             activations = ['tanh', ]
 
-
         return epochs, in_ratio, dropout, layer_sizes, activations
 
 
@@ -291,4 +289,3 @@ if __name__ == "__main__":
     print('Nodes', len(node_data.index), "Edges", len(edgelist.index))
     print(node_data)
     print(edgelist)
-
