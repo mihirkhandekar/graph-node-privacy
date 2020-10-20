@@ -677,7 +677,7 @@ print("#### Attack 3d Accuracy (Entropies) : {}/{}, AUC={}/{}".format(accuracy_s
 layers = model.layers
 layers_output = model.layers[-2].output
 new_model = tf.compat.v1.keras.Model(model.input, layers_output)
-intermediate_outputs = model.predict(test_gen_noedge).squeeze()
+intermediate_outputs = new_model.predict(test_gen_noedge).squeeze()
 features_know = node_data_know[feature_names].to_numpy()
 
 X = np.concatenate([intermediate_outputs, X, X2, entropies], axis=1)

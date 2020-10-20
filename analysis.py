@@ -1,41 +1,27 @@
 import json
 import os
 import random
-from collections import Counter
-from functools import reduce
-from os import name
-from matplotlib import pyplot
 
 import matplotlib.pyplot as plt
-import networkx as nx
-
 import numpy as np
-import pandas as pd
-import scipy.stats as stats
-import sklearn.metrics as skmet
+import scipy
 import stellargraph as sg
 import tensorflow as tf
 from scipy.special import entr
-from sklearn import feature_extraction, model_selection, preprocessing, svm
-from sklearn.cluster import AgglomerativeClustering, KMeans, SpectralClustering
+from sklearn import svm
 from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.model_selection import train_test_split
-from sklearn.neural_network import MLPClassifier
-from stellargraph import datasets, globalvar
-from stellargraph.layer import GCN
 from stellargraph.mapper import FullBatchNodeGenerator
 from tensorflow.keras import backend as K
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.models import Sequential
-from xgboost import XGBClassifier, XGBRegressor
 
 from data import Data
 from model import GCNModel, get_target_encoding, get_train_data
-from plot import create_label_ratio_plot, plot_rocauc, plot_model_degree_histograms, create_network_graph
+from plot import create_network_graph, plot_model_degree_histograms
 
 # os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-
+rrr = round
 
 # tf.get_logger().setLevel('WARNING')
 
@@ -54,6 +40,56 @@ method = 'gcn'
 TRAIN = True
 TRAIN_SHADOW = False
 seq_epochs = {'citeseer': 20, 'cora': 35, 'facebook': 20, 'pubmed': 200}
+
+#models = ['facebook', 'cora', 'citeseer', 'pubmed', 'financial']
+#models = ['cora', 'citeseer', 'facebook', 'pubmed']
+models = ['cora', 'citeseer']
+num_rounds = 10
+
+
+def convert_vals_to_str(dic):
+    for k, v in dic.items():
+        dic[k] = str(v)
+    return dic
+
+
+def add_to_confusion_dict(dic, real, pred):
+    if real == 1.0:
+        if pred < 0.5:  # False negative
+            dic['fn'] += 1
+        else:   # True positive
+            dic['tp'] += 1
+    elif real == 0.0:
+        if pred < 0.5:  # true negative
+            dic['tn'] += 1
+        else:   # false positive
+            dic['fp'] += 1
+
+
+def find_max_subtree_len(node, round, checked_nodes, edges, node_labels, iteration=0):
+    ns = neighbours[model_name][node]
+    checked_nodes.append(node)
+    lgth = 1
+    if iteration >= 10:
+        return lgth
+    if round in index_round[model_name][node]:
+        pred = index_pred_mem[model_name][node][round]
+        real = index_real_mem[model_name][node][round]
+        if (real == 0.0 and pred > 0.5) or (real == 1.0 and pred <= 0.5):
+            correct = 0
+        else:
+            correct = 1
+        node_labels[node] = correct
+        for nd in ns:
+            if nd in index_pred_mem[model_name] and nd not in checked_nodes:
+                neighbour_rounds = index_round[model_name][nd]
+                if round in neighbour_rounds:  # If neighbour was present in ith round
+                    edges.append([nd, node])
+                    subtree_len = find_max_subtree_len(
+                        nd, round, checked_nodes, edges, node_labels, iteration+1)
+                    lgth += subtree_len
+
+    return lgth
 
 
 def load_and_train_model(dataset_name, test_acc_graph, degrees, neighbours):
@@ -101,72 +137,47 @@ def load_and_train_model(dataset_name, test_acc_graph, degrees, neighbours):
     # Although all Node IDs are used,
     # only the IN edgelist is used for training
 
-    if TRAIN:
-        history = model.fit(
-            train_gen,
-            epochs=epochs,
-            validation_data=val_gen,
-            # verbose=0,
-            shuffle=False,
-            callbacks=[ModelCheckpoint(
-                "logs/{}_best_model.h5".format(dataset_name))]
-        )
-        target_encoding = get_target_encoding(node_data_out, node_label)
-        test_gen = generator.flow(node_data_out.index, target_encoding)
-
-        test_metrics = model.evaluate_generator(test_gen)
-        print("\nOUT Set Metrics:")
-        for name, val in zip(model.metrics_names, test_metrics):
-            print("\t{}: {:0.4f}".format(name, val))
-        test_acc_graph[dataset_name] = test_metrics[1]
-        train_metrics = model.evaluate_generator(train_gen)
-        print("\nIN Set Metrics:")
-        for name, val in zip(model.metrics_names, train_metrics):
-            print("\t{}: {:0.4f}".format(name, val))
-    else:
-        model.load_weights("logs/{}_best_model.h5".format(dataset_name))
-
-    return model, train_gen, val_gen, node_ids_in, node_ids_out, node_data, edgelist, node_data_in, node_data_out, node_label, feature_names, generator
-
-
-def train_seq_gnn_model(node_data_in, node_data_out, node_label, feature_names, model_name, edgelist, node_data, acc_dict, test_acc_seq):
-    dataset = Data(model_name)
-    epochs, in_ratio, dropout, layer_sizes, activations = dataset.get_params()
-    gcnmodel = GCNModel(dropout=dropout, layer_sizes=layer_sizes,
-                        activations=activations)
-    edgelist_none = edgelist[:]
-    train_data, val_data, train_targets, val_targets = get_train_data(
-        node_data_in, node_label)    # Split IN data into train and validation sets
-    model, train_gen, val_gen, generator = gcnmodel.get_model(
-        node_data[feature_names], edgelist_none, train_data.index, train_targets, val_data.index, val_targets, method=method)
-    history = model.fit(
+    _ = model.fit(
         train_gen,
-        epochs=int(epochs),  # - 0.2 * epochs),
+        epochs=epochs,
         validation_data=val_gen,
         # verbose=0,
         shuffle=False,
         callbacks=[ModelCheckpoint(
-            "logs/{}_noedge_best_model.h5".format(model_name))]
+            "logs/{}_best_model.h5".format(dataset_name))]
     )
-
-    G = sg.StellarGraph(nodes={"paper": node_data[feature_names]},
-                        edges={"cites": edgelist})
-
-    generator = FullBatchNodeGenerator(G, method=method)
-
     train_encoding = get_target_encoding(node_data_in, node_label)
-    train_gen = generator.flow(node_data_in.index, train_encoding)
-
     target_encoding = get_target_encoding(node_data_out, node_label)
     test_gen = generator.flow(node_data_out.index, target_encoding)
 
-    train_metrics = model.evaluate_generator(train_gen)
-    print("\nIN Set Metrics:", model.metrics_names, train_metrics)
     test_metrics = model.evaluate_generator(test_gen)
-    print("\nOUT Set Metrics:", model.metrics_names, test_metrics)
-    test_acc_seq[model_name] = test_metrics[1]
-    graph_attack(model, train_gen, test_gen, train_encoding, target_encoding,
-                 node_data_in.index, node_data_out.index, acc_dict, model_name, loss='crossentropy')
+    print("\nOUT Set Metrics:")
+    for name, val in zip(model.metrics_names, test_metrics):
+        print("\t{}: {:0.4f}".format(name, val))
+    test_acc_graph[dataset_name] = str(test_metrics[1])
+    train_metrics = model.evaluate_generator(train_gen)
+    print("\nIN Set Metrics:")
+    for name, val in zip(model.metrics_names, train_metrics):
+        print("\t{}: {:0.4f}".format(name, val))
+
+    # Train with partial edges
+    total_edges = len(edgelist_in.index)
+    part_outputs_in = []
+    part_outputs_out = []
+    for i in range(1, 10):
+        ratio = int((10 - i)/10 * total_edges)
+        Gx = sg.StellarGraph(nodes={"paper": node_data[feature_names]},
+                             edges={"cites": edgelist_in.sample(n=ratio)})
+        generator_part = FullBatchNodeGenerator(Gx, method=method)
+        train_gen_part = generator_part.flow(
+            node_data_in.index, train_encoding)
+        test_gen_part = generator_part.flow(
+            node_data_out.index, target_encoding)
+        # print(model.predict_generator(train_gen_part))
+        part_outputs_in.append(model.predict_generator(train_gen_part)[0])
+        part_outputs_out.append(model.predict_generator(test_gen_part)[0])
+
+    return model, train_gen, val_gen, node_ids_in, node_ids_out, node_data, edgelist, node_data_in, node_data_out, node_label, feature_names, generator, part_outputs_in, part_outputs_out
 
 
 def train_seq_seq_model(node_data_in, node_data_out, node_label, feature_names, model_name, edgelist, node_data, acc_dict, test_acc_seq):
@@ -195,10 +206,31 @@ def train_seq_seq_model(node_data_in, node_data_out, node_label, feature_names, 
     print("\nIN Set Metrics:", model.metrics_names, train_metrics)
     test_metrics = model.evaluate(x_out, y_out)
     print("\nOUT Set Metrics:", model.metrics_names, test_metrics)
-    test_acc_seq[model_name] = test_metrics[1]
+    test_acc_seq[model_name] = str(test_metrics[1])
 
     graph_attack(model, x_in, x_out, y_in, y_out, node_data_in.index,
                  node_data_out.index, acc_dict, model_name, loss='crossentropy')
+
+
+def graph_attack_part(part_outputs_in, part_outputs_out, partial_edge_graph, model_name):
+    attack_aucs = []
+    for part_output_in, part_output_out in zip(part_outputs_in, part_outputs_out):
+        rms_loss_train = np.sqrt(
+            np.sum(np.abs(part_output_in**2 - train_encoding**2), axis=1))
+        rms_loss_test = np.sqrt(
+            np.sum(np.abs(part_output_out**2 - target_encoding**2), axis=1))
+        min_len = int(min(len(rms_loss_train), len(rms_loss_test)))
+
+        x = np.concatenate(
+            [rms_loss_train[:min_len], rms_loss_test[:min_len]])
+        y = np.concatenate(
+            [[1. for _ in range(min_len)], [0. for _ in range(min_len)]])
+
+        clf = svm.SVR()
+        clf.fit(x.reshape(-1, 1), y)
+        y_pred = clf.predict(x.reshape(-1, 1))
+        attack_aucs.append(str(roc_auc_score(y, y_pred > 0.5)))
+    partial_edge_graph[model_name] = attack_aucs
 
 
 def graph_attack(model, train_gen, test_gen, train_encoding, target_encoding, in_index, out_index, acc_dict, model_name, round=None, graph=None, loss='rms'):
@@ -243,37 +275,45 @@ def graph_attack(model, train_gen, test_gen, train_encoding, target_encoding, in
     clf = svm.SVR()
     clf.fit(x.reshape(-1, 1), y)
     y_pred = clf.predict(x.reshape(-1, 1))
-    acc_dict[model_name] = roc_auc_score(y, y_pred > 0.5)
+    acc_dict[model_name] = str(roc_auc_score(y, y_pred > 0.5))
 
     if graph:
-        index_real_mem, index_pred_mem, index_loss, index_round = graph
+        intermediate_output = model.layers[-2].output
+        new_model = tf.compat.v1.keras.Model(model.input, intermediate_output)
+        intermediate_outputs_in = new_model.predict(train_gen).squeeze()
+        intermediate_outputs_out = new_model.predict(test_gen).squeeze()
+        intermediate_outputs = np.concatenate(
+            [intermediate_outputs_in, intermediate_outputs_out])
+
+        index_real_mem, index_pred_mem, index_loss, index_round, index_intermediate = graph
         if model_name not in index_real_mem:
             index_real_mem[model_name] = {}
             index_pred_mem[model_name] = {}
             index_loss[model_name] = {}
             index_round[model_name] = {}
-        for loss, membership, pred_membership, index in zip(x, y, y_pred, ind):
+            index_intermediate[model_name] = {}
+        for loss, membership, pred_membership, index, int_op in zip(x, y, y_pred, ind, intermediate_outputs):
             if index in index_real_mem[model_name]:
                 index_loss[model_name][index].append(loss)
                 index_pred_mem[model_name][index].append(pred_membership)
                 index_real_mem[model_name][index].append(membership)
                 index_round[model_name][index].append(round)
+                index_intermediate[model_name][index].append(int_op)
             else:
                 index_loss[model_name][index] = [loss]
                 index_pred_mem[model_name][index] = [pred_membership]
                 index_real_mem[model_name][index] = [membership]
                 index_round[model_name][index] = [round]
+                index_intermediate[model_name][index] = [int_op]
 
     return clf.support_vectors_[0][0]
 
 
-#models = ['facebook', 'cora', 'citeseer', 'pubmed', 'financial']
-models = ['cora', 'citeseer', 'facebook']
-#models = ['cora']
 attack_auc_seqs = []
 test_acc_seqs = []
 attack_auc_graphs = []
 test_acc_graphs = []
+partial_edge_graphs = []
 degrees = {}
 neighbours = {}
 
@@ -281,10 +321,12 @@ index_real_mem = {}
 index_pred_mem = {}
 index_loss = {}
 index_round = {}
+index_intermediate = {}
+
 
 loss_thresholds = {}
+intracluster_distances = {}
 
-num_rounds = 1
 
 for i in range(num_rounds):
     print('########################**************** ROUND ', i+1)
@@ -292,18 +334,23 @@ for i in range(num_rounds):
     test_acc_seq = {}
     attack_auc_graph = {}
     test_acc_graph = {}
+    partial_edge_graph = {}
 
     for model_name in models:
         print('***************************** Model ', model_name)
         print('***************************** GRAPH ATTACK Model {} Round {}'.format(model_name, i+1))
-        model, train_gen, val_gen, node_ids_in, node_ids_out, node_data, edgelist, node_data_in, node_data_out, node_label, feature_names, generator = load_and_train_model(
+        graph_model, train_gen, val_gen, node_ids_in, node_ids_out, node_data, edgelist, node_data_in, node_data_out, node_label, feature_names, generator, part_outputs_in, part_outputs_out = load_and_train_model(
             model_name, test_acc_graph, degrees, neighbours)
+
         train_encoding = get_target_encoding(node_data_in, node_label)
         train_gen = generator.flow(node_data_in.index, train_encoding)
         target_encoding = get_target_encoding(node_data_out, node_label)
         test_gen = generator.flow(node_data_out.index, target_encoding)
-        threshold = graph_attack(model, train_gen, test_gen, train_encoding, target_encoding,
-                                 node_data_in.index, node_data_out.index, attack_auc_graph, model_name, round=i, graph=(index_real_mem, index_pred_mem, index_loss, index_round))
+        threshold = graph_attack(graph_model, train_gen, test_gen, train_encoding, target_encoding,
+                                 node_data_in.index, node_data_out.index, attack_auc_graph, model_name, round=i, graph=(index_real_mem, index_pred_mem, index_loss, index_round, index_intermediate))
+
+        graph_attack_part(part_outputs_in, part_outputs_out,
+                          partial_edge_graph, model_name)
 
         if model_name not in loss_thresholds:
             loss_thresholds[model_name] = [threshold]
@@ -323,51 +370,17 @@ for i in range(num_rounds):
     test_acc_seqs.append(test_acc_seq)
     attack_auc_graphs.append(attack_auc_graph)
     test_acc_graphs.append(test_acc_graph)
+    partial_edge_graphs.append(partial_edge_graph)
+
+with open('records/attack_auc_seq.json', 'w') as f, open('records/attack_auc_graph.json', 'w') as f2, open('records/test_acc_seq.json', 'w') as f3, open('records/test_acc_graph.json', 'w') as f4, open('records/partial_edge_graph.json', 'w') as f5:
+    json.dump(attack_auc_seqs, f)
+    json.dump(attack_auc_graphs, f2)
+    json.dump(test_acc_seqs, f3)
+    json.dump(test_acc_graphs, f4)
+    json.dump(partial_edge_graphs, f5)
 
 
-def convert_vals_to_str(dic):
-    for k, v in dic.items():
-        dic[k] = str(v)
-    return dic
-
-
-def add_to_confusion_dict(dic, real, pred):
-    if real == 1.0:
-        if pred < 0.5:  # False negative
-            dic['fn'] += 1
-        else:   # True positive
-            dic['tp'] += 1
-    elif real == 0.0:
-        if pred < 0.5:  # true negative
-            dic['tn'] += 1
-        else:   # false positive
-            dic['fp'] += 1
-
-
-def find_max_subtree_len(node, round, checked_nodes, edges, node_labels):
-    ns = neighbours[model_name][node]
-    checked_nodes.append(node)
-    lgth = 1
-
-    if round in index_round[model_name][node]:
-        pred = index_pred_mem[model_name][node][round]
-        real = index_real_mem[model_name][node][round]
-        if (real == 0.0 and pred > 0.5) or (real == 1.0 and pred <= 0.5):
-            correct = 0
-        else:
-            correct = 1
-        node_labels[node] = correct
-        for nd in ns:
-            if nd in index_pred_mem[model_name] and nd not in checked_nodes:
-                neighbour_rounds = index_round[model_name][nd]
-                if round in neighbour_rounds:  # If neighbour was present in ith round
-                    edges.append([nd, node])
-                    subtree_len = find_max_subtree_len(
-                        nd, round, checked_nodes, edges, node_labels)
-                    lgth += subtree_len
-    return lgth
-
-
+# ANALYSIS
 for model_name in models:
     print("####################### MODEL NAME #######################", model_name)
     # Plot prediction vs degree histogram (members vs non-members)
@@ -454,9 +467,10 @@ for model_name in models:
     print(max_depth, max_node, max_round, max_edges, max_node_labels)
     print(max_depth2, max_node2, max_round2, max_edges2, max_node_labels2)
 
-    create_network_graph(max_node_labels, max_edges, model_name, num=0)
-    create_network_graph(max_node_labels2, max_edges2, model_name, num=1)
-
+    if max_node_labels:
+        create_network_graph(max_node_labels, max_edges, model_name, num=0)
+    if max_node_labels2:
+        create_network_graph(max_node_labels2, max_edges2, model_name, num=1)
 
     # Is an incorrectly classified node incorrect in each iteration?
     accuracies = []
@@ -470,5 +484,63 @@ for model_name in models:
     plt.legend(loc='upper right')
     plt.savefig('analysis_plots/' + model_name +
                 '/node_acc', bbox_inches="tight")
+    plt.clf()
+    plt.cla()
+
+    # How far are node embeddings
+    tp_int = [[] for _ in range(num_rounds)]
+    fp_int = [[] for _ in range(num_rounds)]
+    tn_int = [[] for _ in range(num_rounds)]
+    fn_int = [[] for _ in range(num_rounds)]
+    for _, (node, intermediates) in enumerate(index_intermediate[model_name].items()):
+        reals = index_real_mem[model_name][node]  # [round]
+        preds = index_pred_mem[model_name][node]  # [round]
+        for round, intermediate in enumerate(intermediates):
+            real = reals[round]
+            pred = preds[round]
+            if real == 1.0:
+                if pred > 0.5:  # TP
+                    tp_int[round].append(intermediate)
+                else:  # FN
+                    fn_int[round].append(intermediate)
+            else:
+                if pred > 0.5:  # FP
+                    fp_int[round].append(intermediate)
+                else:  # TN
+                    tn_int[round].append(intermediate)
+
+    round_results = []
+    for round in range(num_rounds):
+        round_result = {}
+        round_result['tp_tp'] = str(np.mean(scipy.spatial.distance.cdist(
+            tp_int[round], tp_int[round])))
+        round_result['fp_fp'] = str(np.mean(scipy.spatial.distance.cdist(
+            fp_int[round], fp_int[round])))
+        round_result['tn_tn'] = str(np.mean(scipy.spatial.distance.cdist(
+            tn_int[round], tn_int[round])))
+        round_result['fn_fn'] = str(np.mean(scipy.spatial.distance.cdist(
+            fn_int[round], fn_int[round])))
+        round_result['tp_fp'] = str(np.mean(scipy.spatial.distance.cdist(
+            tp_int[round], fp_int[round])))
+        round_result['tp_fn'] = str(np.mean(scipy.spatial.distance.cdist(
+            tp_int[round], fn_int[round])))
+        round_result['tp_tn'] = str(np.mean(scipy.spatial.distance.cdist(
+            tp_int[round], tn_int[round])))
+
+        round_results.append(round_result)
+
+    with open('analysis_records/{}_intracluster_dist.json'.format(model_name), 'w') as f:
+        json.dump(round_results, f)
+
+    # Perturbations (Removal of edges)
+    graph = [rrr(float(c), 2) for c in partial_edge_graphs[0][model_name]]
+    labels = [str(i * 10) + '%' for i in range(1, 10)]
+
+    plt.plot(labels, graph)
+    plt.title('Attack v/s perturbed edges')
+    plt.xlabel('Edges perturbed')
+    plt.ylabel('Attack AUC')
+    plt.savefig('analysis_plots/' + model_name +
+                '/edge_perturb', bbox_inches="tight")
     plt.clf()
     plt.cla()
