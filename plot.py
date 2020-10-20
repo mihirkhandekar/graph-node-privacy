@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import sklearn.metrics as skmet
+from networkx.drawing.nx_agraph import graphviz_layout, pygraphviz_layout
 
 
 def plot_rocauc(y_test, y_pred, name):
@@ -83,5 +85,35 @@ def create_label_ratio_plot(plt_labels, plt_scores, plt_ratio, name):
 
     # fig.tight_layout()
     plt.savefig('plots/' + name, bbox_inches="tight")
+    plt.clf()
+    plt.cla()
+
+
+def create_network_graph(max_node_labels, max_edges, model_name, num=0):
+    sg = nx.Graph()
+
+    correct_nodelist = []
+    incorrect_nodelist = []
+    plt_labels = {}
+    for node_id, label in max_node_labels.items():
+        plt_labels[node_id] = node_id
+        if label == 1:
+            correct_nodelist.append(node_id)
+        else:
+            incorrect_nodelist.append(node_id)
+
+    sg.add_nodes_from(correct_nodelist)
+    sg.add_nodes_from(incorrect_nodelist)
+
+    pos = nx.spring_layout(sg)
+
+    nx.draw_networkx_nodes(sg, pos, nodelist=correct_nodelist, node_color="b")
+    nx.draw_networkx_nodes(
+        sg, pos, nodelist=incorrect_nodelist, node_color="r")
+    nx.draw_networkx_edges(sg, pos, edgelist=max_edges, width=1.0, alpha=0.5)
+    nx.draw_networkx_labels(sg, pos, plt_labels, font_size=10)
+
+    plt.savefig('analysis_plots/' + model_name +
+                '/max_subgraph' + str(num), bbox_inches="tight")
     plt.clf()
     plt.cla()
