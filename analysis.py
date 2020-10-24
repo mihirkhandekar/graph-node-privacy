@@ -7,6 +7,7 @@ import numpy as np
 import scipy
 import stellargraph as sg
 import tensorflow as tf
+from matplotlib.pyplot import yscale
 from scipy.special import entr
 from sklearn import svm
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -43,8 +44,8 @@ seq_epochs = {'citeseer': 20, 'cora': 35, 'facebook': 20, 'pubmed': 200}
 
 #models = ['facebook', 'cora', 'citeseer', 'pubmed', 'financial']
 #models = ['cora', 'citeseer', 'facebook', 'pubmed']
-models = ['cora', 'citeseer']
-num_rounds = 10
+models = ['cora', 'citeseer', 'facebook', 'pubmed']
+num_rounds = 15
 
 
 def convert_vals_to_str(dic):
@@ -73,8 +74,9 @@ def find_max_subtree_len(node, round, checked_nodes, edges, node_labels, iterati
     if iteration >= 10:
         return lgth
     if round in index_round[model_name][node]:
-        pred = index_pred_mem[model_name][node][round]
-        real = index_real_mem[model_name][node][round]
+        r = index_round[model_name][node].index(round)
+        pred = index_pred_mem[model_name][node][r]
+        real = index_real_mem[model_name][node][r]
         if (real == 0.0 and pred > 0.5) or (real == 1.0 and pred <= 0.5):
             correct = 0
         else:
@@ -384,163 +386,181 @@ with open('records/attack_auc_seq.json', 'w') as f, open('records/attack_auc_gra
 for model_name in models:
     print("####################### MODEL NAME #######################", model_name)
     # Plot prediction vs degree histogram (members vs non-members)
-    plot_model_degree_histograms(
-        degrees, index_pred_mem, index_real_mem, model_name)
+    try:
+        plot_model_degree_histograms(
+            degrees, index_pred_mem, index_real_mem, model_name)
+    except e:
+        pass
 
     # See if neighbours of FP, FN are P or N
     # Are incorrectly classified nodes clustered together?
-    fp = {'fn': 0, 'tn': 0, 'tp': 0, 'fp': 0}
-    fn = {'fn': 0, 'tn': 0, 'tp': 0, 'fp': 0}
-
-    for node, reals in index_real_mem[model_name].items():
-        preds = index_pred_mem[model_name][node]
-        ns = neighbours[model_name][node]
-        for i, (real, pred) in enumerate(zip(reals, preds)):
-            if real == 1.0 and pred < 0.5:
-                # false negative case
-                for neighbour in ns:
-                    if neighbour in index_pred_mem[model_name]:
-                        neighbour_rounds = index_round[model_name][neighbour]
-                        if i in neighbour_rounds:  # If neighbour was present in ith round
-                            round = neighbour_rounds.index(i)
-                            nei_pred = index_pred_mem[model_name][neighbour][round]
-                            nei_real = index_real_mem[model_name][neighbour][round]
-                            add_to_confusion_dict(fn, nei_real, nei_pred)
-            elif real == 0.0 and pred >= 0.5:
-                # false positive case
-                for neighbour in ns:
-                    if neighbour in index_pred_mem[model_name]:
-                        neighbour_rounds = index_round[model_name][neighbour]
-                        if i in neighbour_rounds:   # If neighbour was present in ith round
-                            round = neighbour_rounds.index(i)
-                            nei_pred = index_pred_mem[model_name][neighbour][round]
-                            nei_real = index_real_mem[model_name][neighbour][round]
-                            add_to_confusion_dict(fp, nei_real, nei_pred)
-
     try:
-        factor = 1.0/sum(fp.values())
-        for k in fp:
-            fp[k] = fp[k]*factor
-        factor = 1.0/sum(fn.values())
-        for k in fn:
-            fn[k] = fn[k]*factor
-    except:
+        fp = {'fn': 0, 'tn': 0, 'tp': 0, 'fp': 0}
+        fn = {'fn': 0, 'tn': 0, 'tp': 0, 'fp': 0}
+
+        for node, reals in index_real_mem[model_name].items():
+            preds = index_pred_mem[model_name][node]
+            ns = neighbours[model_name][node]
+            for i, (real, pred) in enumerate(zip(reals, preds)):
+                if real == 1.0 and pred < 0.5:
+                    # false negative case
+                    for neighbour in ns:
+                        if neighbour in index_pred_mem[model_name]:
+                            neighbour_rounds = index_round[model_name][neighbour]
+                            if i in neighbour_rounds:  # If neighbour was present in ith round
+                                round = neighbour_rounds.index(i)
+                                nei_pred = index_pred_mem[model_name][neighbour][round]
+                                nei_real = index_real_mem[model_name][neighbour][round]
+                                add_to_confusion_dict(fn, nei_real, nei_pred)
+                elif real == 0.0 and pred >= 0.5:
+                    # false positive case
+                    for neighbour in ns:
+                        if neighbour in index_pred_mem[model_name]:
+                            neighbour_rounds = index_round[model_name][neighbour]
+                            if i in neighbour_rounds:   # If neighbour was present in ith round
+                                round = neighbour_rounds.index(i)
+                                nei_pred = index_pred_mem[model_name][neighbour][round]
+                                nei_real = index_real_mem[model_name][neighbour][round]
+                                add_to_confusion_dict(fp, nei_real, nei_pred)
+        try:
+            factor = 1.0/sum(fp.values())
+            for k in fp:
+                fp[k] = fp[k]*factor
+            factor = 1.0/sum(fn.values())
+            for k in fn:
+                fn[k] = fn[k]*factor
+        except:
+            pass
+        print('FALSE Positive nodes', fp)
+        print('FALSE Negative nodes', fn)
+        with open('analysis_records/{}_neighbour_dist_fp.json'.format(model_name), 'w') as f, open('analysis_records/{}_neighbour_dist_fn.json'.format(model_name), 'w') as f2:
+            json.dump(fp, f)
+            json.dump(fn, f2)
+    except e:
         pass
-    print('FALSE Positive nodes', fp)
-    print('FALSE Negative nodes', fn)
-    with open('analysis_records/{}_neighbour_dist_fp.json'.format(model_name), 'w') as f, open('analysis_records/{}_neighbour_dist_fn.json'.format(model_name), 'w') as f2:
-        json.dump(fp, f)
-        json.dump(fn, f2)
 
     # * Find largest subtree to draw
-    max_depth = 0
-    max_node, max_round = None, None
-    max_edges, max_node_labels = None, None
+    try:
+        max_depth = 0
+        max_node, max_round = None, None
+        max_edges, max_node_labels = None, None
 
-    max_depth2 = 0
-    max_node2, max_round2 = None, None
-    max_edges2, max_node_labels2 = None, None
+        max_depth2 = 0
+        max_node2, max_round2 = None, None
+        max_edges2, max_node_labels2 = None, None
 
-    max_subtrees = []
+        max_subtrees = []
 
-    for node, reals in index_real_mem[model_name].items():
-        for round in range(num_rounds):
-            edges = []
-            node_labels = {}
-            node_known_depth = find_max_subtree_len(
-                node, round, [], edges, node_labels)
-            if node_known_depth > max_depth:
-                max_depth2 = max_depth
-                max_node2 = max_node
-                max_round2 = max_round
-                if max_edges:
-                    max_edges2 = list(max_edges)
-                if max_node_labels:
-                    max_node_labels2 = dict(max_node_labels)
+        for node, reals in index_real_mem[model_name].items():
+            for round in range(num_rounds):
+                edges = []
+                node_labels = {}
+                node_known_depth = find_max_subtree_len(
+                    node, round, [], edges, node_labels)
+                if node_known_depth > max_depth:
+                    max_depth2 = max_depth
+                    max_node2 = max_node
+                    max_round2 = max_round
+                    if max_edges:
+                        max_edges2 = list(max_edges)
+                    if max_node_labels:
+                        max_node_labels2 = dict(max_node_labels)
 
-                max_depth = node_known_depth
-                max_node = node
-                max_round = round
-                max_edges = list(edges)
-                max_node_labels = dict(node_labels)
+                    max_depth = node_known_depth
+                    max_node = node
+                    max_round = round
+                    max_edges = list(edges)
+                    max_node_labels = dict(node_labels)
 
-    print(max_depth, max_node, max_round, max_edges, max_node_labels)
-    print(max_depth2, max_node2, max_round2, max_edges2, max_node_labels2)
+        print(max_depth, max_node, max_round, max_edges, max_node_labels)
+        print(max_depth2, max_node2, max_round2, max_edges2, max_node_labels2)
 
-    if max_node_labels:
-        create_network_graph(max_node_labels, max_edges, model_name, num=0)
-    if max_node_labels2:
-        create_network_graph(max_node_labels2, max_edges2, model_name, num=1)
+        if max_node_labels:
+            create_network_graph(max_node_labels, max_edges, model_name, num=0)
+        if max_node_labels2:
+            create_network_graph(
+                max_node_labels2, max_edges2, model_name, num=1)
+    except _:
+        pass
 
     # Is an incorrectly classified node incorrect in each iteration?
-    accuracies = []
-    for node, reals in index_real_mem[model_name].items():
-        preds = index_pred_mem[model_name][node]
-        ns = neighbours[model_name][node]
-        acc = accuracy_score(reals, np.array(preds) > 0.5)
-        accuracies.append(acc)
-    bins = np.linspace(0, 1, 20)
-    plt.hist(accuracies, bins, alpha=0.5, label='Node-wise accuracy')
-    plt.legend(loc='upper right')
-    plt.savefig('analysis_plots/' + model_name +
-                '/node_acc', bbox_inches="tight")
-    plt.clf()
-    plt.cla()
+    try:
+        accuracies = []
+        for node, reals in index_real_mem[model_name].items():
+            preds = index_pred_mem[model_name][node]
+            ns = neighbours[model_name][node]
+            acc = accuracy_score(reals, np.array(preds) > 0.5)
+            accuracies.append(acc)
+        bins = np.linspace(0, 1, 20)
+        plt.hist(accuracies, bins, alpha=0.5, label='Node-wise accuracy')
+        plt.legend(loc='upper right')
+        plt.savefig('analysis_plots/' + model_name +
+                    '/node_acc', bbox_inches="tight")
+        plt.clf()
+        plt.cla()
+    except _:
+        pass
 
     # How far are node embeddings
-    tp_int = [[] for _ in range(num_rounds)]
-    fp_int = [[] for _ in range(num_rounds)]
-    tn_int = [[] for _ in range(num_rounds)]
-    fn_int = [[] for _ in range(num_rounds)]
-    for _, (node, intermediates) in enumerate(index_intermediate[model_name].items()):
-        reals = index_real_mem[model_name][node]  # [round]
-        preds = index_pred_mem[model_name][node]  # [round]
-        for round, intermediate in enumerate(intermediates):
-            real = reals[round]
-            pred = preds[round]
-            if real == 1.0:
-                if pred > 0.5:  # TP
-                    tp_int[round].append(intermediate)
-                else:  # FN
-                    fn_int[round].append(intermediate)
-            else:
-                if pred > 0.5:  # FP
-                    fp_int[round].append(intermediate)
-                else:  # TN
-                    tn_int[round].append(intermediate)
+    try:
+        tp_int = [[] for _ in range(num_rounds)]
+        fp_int = [[] for _ in range(num_rounds)]
+        tn_int = [[] for _ in range(num_rounds)]
+        fn_int = [[] for _ in range(num_rounds)]
+        for _, (node, intermediates) in enumerate(index_intermediate[model_name].items()):
+            reals = index_real_mem[model_name][node]  # [round]
+            preds = index_pred_mem[model_name][node]  # [round]
+            for round, intermediate in enumerate(intermediates):
+                real = reals[round]
+                pred = preds[round]
+                if real == 1.0:
+                    if pred > 0.5:  # TP
+                        tp_int[round].append(intermediate)
+                    else:  # FN
+                        fn_int[round].append(intermediate)
+                else:
+                    if pred > 0.5:  # FP
+                        fp_int[round].append(intermediate)
+                    else:  # TN
+                        tn_int[round].append(intermediate)
 
-    round_results = []
-    for round in range(num_rounds):
-        round_result = {}
-        round_result['tp_tp'] = str(np.mean(scipy.spatial.distance.cdist(
-            tp_int[round], tp_int[round])))
-        round_result['fp_fp'] = str(np.mean(scipy.spatial.distance.cdist(
-            fp_int[round], fp_int[round])))
-        round_result['tn_tn'] = str(np.mean(scipy.spatial.distance.cdist(
-            tn_int[round], tn_int[round])))
-        round_result['fn_fn'] = str(np.mean(scipy.spatial.distance.cdist(
-            fn_int[round], fn_int[round])))
-        round_result['tp_fp'] = str(np.mean(scipy.spatial.distance.cdist(
-            tp_int[round], fp_int[round])))
-        round_result['tp_fn'] = str(np.mean(scipy.spatial.distance.cdist(
-            tp_int[round], fn_int[round])))
-        round_result['tp_tn'] = str(np.mean(scipy.spatial.distance.cdist(
-            tp_int[round], tn_int[round])))
+        round_results = []
+        for round in range(num_rounds):
+            round_result = {}
+            round_result['tp_tp'] = str(np.mean(scipy.spatial.distance.cdist(
+                tp_int[round], tp_int[round])))
+            round_result['fp_fp'] = str(np.mean(scipy.spatial.distance.cdist(
+                fp_int[round], fp_int[round])))
+            round_result['tn_tn'] = str(np.mean(scipy.spatial.distance.cdist(
+                tn_int[round], tn_int[round])))
+            round_result['fn_fn'] = str(np.mean(scipy.spatial.distance.cdist(
+                fn_int[round], fn_int[round])))
+            round_result['tp_fp'] = str(np.mean(scipy.spatial.distance.cdist(
+                tp_int[round], fp_int[round])))
+            round_result['tp_fn'] = str(np.mean(scipy.spatial.distance.cdist(
+                tp_int[round], fn_int[round])))
+            round_result['tp_tn'] = str(np.mean(scipy.spatial.distance.cdist(
+                tp_int[round], tn_int[round])))
 
-        round_results.append(round_result)
+            round_results.append(round_result)
 
-    with open('analysis_records/{}_intracluster_dist.json'.format(model_name), 'w') as f:
-        json.dump(round_results, f)
+        with open('analysis_records/{}_intracluster_dist.json'.format(model_name), 'w') as f:
+            json.dump(round_results, f)
+    except _:
+        pass
 
     # Perturbations (Removal of edges)
-    graph = [rrr(float(c), 2) for c in partial_edge_graphs[0][model_name]]
-    labels = [str(i * 10) + '%' for i in range(1, 10)]
+    try:
+        graph = [rrr(float(c), 2) for c in partial_edge_graphs[0][model_name]]
+        labels = [str(i * 10) + '%' for i in range(1, 10)]
 
-    plt.plot(labels, graph)
-    plt.title('Attack v/s perturbed edges')
-    plt.xlabel('Edges perturbed')
-    plt.ylabel('Attack AUC')
-    plt.savefig('analysis_plots/' + model_name +
-                '/edge_perturb', bbox_inches="tight")
-    plt.clf()
-    plt.cla()
+        plt.plot(labels, graph, yscale)
+        plt.title('Attack v/s perturbed edges')
+        plt.xlabel('Edges perturbed')
+        plt.ylabel('Attack AUC')
+        plt.savefig('analysis_plots/' + model_name +
+                    '/edge_perturb', bbox_inches="tight")
+        plt.clf()
+        plt.cla()
+    except _:
+        pass
